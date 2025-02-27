@@ -78,20 +78,23 @@ async def verify_telegram_token(x_telegram_bot_api_secret_token: str = Header(No
     return True
 
 @app.post("/webhook")
-async def telegram_webhook_handler(update: TelegramUpdate, verified: bool = Depends(verify_telegram_token)):
+async def telegram_webhook_handler(request: Request, verified: bool = Depends(verify_telegram_token)):
     """
     Обработчик webhook-запросов от Telegram.
-    
-    Args:
-        update: Объект с обновлением от Telegram
-        verified: Результат проверки секретного токена
-        
-    Returns:
-        dict: Пустой ответ для Telegram
     """
     try:
         logger.info("Начало обработки webhook-запроса от Telegram")
-        logger.debug(f"Получено обновление: {update}")
+        
+        # Получаем и логируем сырые данные
+        body = await request.json()
+        logger.info(f"Получены данные от Telegram: {json.dumps(body, indent=2)}")
+        
+        # Проверяем структуру данных
+        if not isinstance(body, dict) or 'update_id' not in body or 'message' not in body:
+            logger.error(f"Некорректная структура данных: {body}")
+            return {}
+            
+        update = TelegramUpdate(**body)
         
         if command_processor is None:
             error_msg = "CommandProcessor не инициализирован"
@@ -105,7 +108,8 @@ async def telegram_webhook_handler(update: TelegramUpdate, verified: bool = Depe
         
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook-запроса: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Возвращаем пустой ответ, чтобы Telegram не пытался переотправить сообщение
+        return {}
 
 @app.get("/health")
 async def health_check():
