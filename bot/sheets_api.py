@@ -113,7 +113,7 @@ class GoogleSheetsAPI:
                     SCOPES
                 )
                 # Используем локальный сервер для авторизации
-                self.credentials = flow.run_local_server(port=0)
+                self.credentials = flow.run_local_server(port=0, open_browser=False)
                 logger.info("Получены новые учетные данные через OAuth 2.0")
                 
                 # Сохраняем учетные данные
