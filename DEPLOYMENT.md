@@ -83,17 +83,25 @@
 
 1. **Проверьте доступность webhook URL**:
    ```bash
-   curl -k https://srgolubev.ru/status
+   curl -k https://srgolubev.ru/webhook
    ```
-   Должен вернуться статус 200 и сообщение "Telegram Bot Webhook is operational".
+   Должен вернуться статус 200 или 405 (Method Not Allowed).
 
-2. **Проверьте настройку вебхука в Telegram**:
+2. **Проверьте настройку вебхука в Telegram** с помощью скрипта:
    ```bash
-   curl -X GET "https://api.telegram.org/bot7613482703:AAEqKQXFZi1EOFtzrT_83J9lGgAtwVTThQM/getWebhookInfo"
+   # Linux
+   ./scripts/check_webhook.sh
+   
+   # Windows
+   .\scripts\check_webhook.ps1
    ```
-   В ответе должен быть указан URL `https://srgolubev.ru/webhook`.
 
-3. **Отправьте тестовое сообщение боту** и проверьте логи на Сервере 2:
+3. **Проверьте работоспособность веб-сайта и вебхука** с помощью скрипта:
+   ```bash
+   python3 scripts/check_website.py --verbose
+   ```
+
+4. **Отправьте тестовое сообщение боту** и проверьте логи на Сервере 2:
    ```bash
    docker-compose logs -f
    ```
@@ -135,4 +143,14 @@
    ```bash
    # На Сервере 1
    telnet 212.224.118.58 8000
+   ```
+
+5. **Исправьте проблемы с отображением HTML-файлов** на Сервере 1:
+   ```bash
+   sudo ./scripts/fix_html_display.sh
+   ```
+
+6. **Проверьте здоровье системы**:
+   ```bash
+   curl -k https://srgolubev.ru/health
    ```
