@@ -110,9 +110,9 @@ class GoogleSheetsAPI:
                 # Запускаем процесс OAuth 2.0
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.client_secrets_file, 
-                    SCOPES
+                    SCOPES,
+                    redirect_uri='urn:ietf:wg:oauth:2.0:oob'
                 )
-                # Используем локальный сервер для авторизации
                 self.credentials = flow.run_local_server(port=0)
                 logger.info("Получены новые учетные данные через OAuth 2.0")
                 
