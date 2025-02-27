@@ -9,14 +9,28 @@
 - REST API для интеграции с другими системами
 - Автоматическое форматирование и расчет сумм в таблицах
 
+## Архитектура
+
+Система развертывается на двух серверах:
+1. **Сервер с доменом** (95.163.234.54) - сервер с доменом srgolubev.ru, на котором настроен Nginx для проксирования webhook-запросов
+2. **Сервер с ботом** (212.224.118.58) - сервер, на котором запущен бот в Docker-контейнере
+
+Такая архитектура обеспечивает:
+- Безопасное SSL-соединение через Nginx
+- Разделение ответственности между серверами
+- Возможность масштабирования
+
 ## Требования
 
 - Python 3.9+
 - Docker и Docker Compose (для контейнеризации)
 - Доступ к Google Sheets API
 - Telegram Bot Token
+- Домен с SSL-сертификатом (для webhook)
 
 ## Установка и запуск
+
+Подробная инструкция по установке и настройке находится в файле [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### Локальная установка
 
@@ -41,7 +55,7 @@ pip install -r requirements.txt
 ```
 # Telegram Bot API
 TELEGRAM_TOKEN=your_telegram_bot_token
-WEBHOOK_URL=https://your-domain.com
+WEBHOOK_URL=https://srgolubev.ru/webhook
 WEBHOOK_SECRET=your_webhook_secret
 
 # OpenAI API Key
@@ -80,6 +94,8 @@ docker-compose up -d
 - `tests/` - Тесты
 - `credentials/` - Директория для учетных данных Google API
 - `Dockerfile` и `docker-compose.yml` - Файлы для контейнеризации
+- `nginx/` - Конфигурационные файлы Nginx
+- `scripts/` - Вспомогательные скрипты
 
 ## Использование
 
