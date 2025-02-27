@@ -53,9 +53,11 @@ class GoogleSheetsAPI:
             token_path = os.path.join('credentials', 'token.json')
             with open(token_path, 'w') as token:
                 import json
-                json.dump(credentials.to_dict(), token)
-
-                
+                if isinstance(credentials, Credentials):
+                    json.dump(credentials.to_json(), token)
+                else:
+                    logger.warning("Пропущено сохранение учетных данных, так как используется сервисный аккаунт.")
+            
             logger.info("Учетные данные успешно сохранены")
             
         except Exception as e:
@@ -74,7 +76,11 @@ class GoogleSheetsAPI:
             if os.path.exists(token_path):
                 with open(token_path, 'r') as token:
                     creds_data = json.load(token)
-                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
+                    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+                    if "type" in creds_data and creds_data["type"] == "service_account":
+                        credentials = ServiceAccountCredentials.from_service_account_info(creds_data)
+                    else:
+                        credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
                     logger.info("Учетные данные успешно загружены")
                     return credentials
                     
