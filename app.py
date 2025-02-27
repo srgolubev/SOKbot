@@ -31,10 +31,27 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Модель данных для сообщения Telegram
+class TelegramMessage(BaseModel):
+    message_id: int
+    from_: dict
+    chat: dict
+    date: int
+    text: str | None = None
+
+    class Config:
+        allow_population_by_field_name = True
+        fields = {
+            'from_': 'from'
+        }
+
 # Модель данных для входящего webhook-запроса от Telegram
 class TelegramUpdate(BaseModel):
     update_id: int
-    message: dict
+    message: TelegramMessage
+
+    class Config:
+        allow_extra = True  # Разрешаем дополнительные поля
 
 # Модель данных для ответа
 class WebhookResponse(BaseModel):
@@ -85,16 +102,37 @@ async def telegram_webhook_handler(request: Request, verified: bool = Depends(ve
     try:
         logger.info("Начало обработки webhook-запроса от Telegram")
         
-        # Получаем и логируем сырые данные
-        body = await request.json()
-        logger.info(f"Получены данные от Telegram: {json.dumps(body, indent=2)}")
+        # Логируем заголовки
+        headers = dict(request.headers)
+        logger.info(f"Заголовки запроса: {json.dumps(headers, indent=2)}")
+        
+        # Получаем тело запроса как байты и декодируем
+        body_bytes = await request.body()
+        body_str = body_bytes.decode()
+        logger.info(f"Тело запроса (сырое): {body_str}")
+        
+        try:
+            body = json.loads(body_str)
+            logger.info(f"Тело запроса (JSON): {json.dumps(body, indent=2)}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка декодирования JSON: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
         
         # Проверяем структуру данных
-        if not isinstance(body, dict) or 'update_id' not in body or 'message' not in body:
-            logger.error(f"Некорректная структура данных: {body}")
-            return {}
+        if not isinstance(body, dict):
+            logger.error(f"Тело запроса не является словарем: {type(body)}")
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object")
             
-        update = TelegramUpdate(**body)
+        if 'update_id' not in body or 'message' not in body:
+            logger.error(f"Отсутствуют обязательные поля в запросе: {body.keys()}")
+            raise HTTPException(status_code=400, detail="Missing required fields")
+            
+        try:
+            update = TelegramUpdate(**body)
+            logger.info("Данные успешно преобразованы в TelegramUpdate")
+        except Exception as e:
+            logger.error(f"Ошибка создания объекта TelegramUpdate: {str(e)}")
+            raise HTTPException(status_code=422, detail=str(e))
         
         if command_processor is None:
             error_msg = "CommandProcessor не инициализирован"
@@ -104,12 +142,13 @@ async def telegram_webhook_handler(request: Request, verified: bool = Depends(ve
         # Обработка сообщения
         await command_processor.process_message(update.message)
         
-        return {}
+        return {"ok": True}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook-запроса: {str(e)}")
-        # Возвращаем пустой ответ, чтобы Telegram не пытался переотправить сообщение
-        return {}
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/health")
 async def health_check():
