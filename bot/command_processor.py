@@ -169,8 +169,8 @@ class CommandProcessor:
             logger.debug(f"Получено сообщение: {message}")
             
             # Получаем текст сообщения и информацию о чате
-            chat_id = message.get('chat', {}).get('id')
-            text = message.get('text', '')
+            chat_id = message.chat["id"]  # chat - это dict внутри TelegramMessage
+            text = message.text or ""  # text - это строка или None
             
             if not chat_id or not text:
                 logger.warning("Получено некорректное сообщение")
