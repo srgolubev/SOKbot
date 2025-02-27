@@ -79,4 +79,37 @@ if ($domainServerPing) {
     Write-Host "Сервер с доменом (95.163.234.54) недоступен" -ForegroundColor Red
 }
 
+# Проверяем доступность сайта
+Write-Host "`nПроверяем доступность сайта (https://srgolubev.ru):" -ForegroundColor Cyan
+try {
+    $response = Invoke-WebRequest -Uri "https://srgolubev.ru" -Method Get -ErrorAction SilentlyContinue
+    Write-Host "Сайт доступен. Статус: $($response.StatusCode) $($response.StatusDescription)" -ForegroundColor Green
+    Write-Host "Размер ответа: $($response.Content.Length) байт" -ForegroundColor Green
+} catch {
+    Write-Host "Сайт недоступен" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+}
+
+# Проверяем доступность тестовой страницы
+Write-Host "`nПроверяем доступность тестовой страницы (https://srgolubev.ru/test.html):" -ForegroundColor Cyan
+try {
+    $response = Invoke-WebRequest -Uri "https://srgolubev.ru/test.html" -Method Get -ErrorAction SilentlyContinue
+    Write-Host "Тестовая страница доступна. Статус: $($response.StatusCode) $($response.StatusDescription)" -ForegroundColor Green
+    Write-Host "Размер ответа: $($response.Content.Length) байт" -ForegroundColor Green
+} catch {
+    Write-Host "Тестовая страница недоступна" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+}
+
+# Проверяем эндпоинт здоровья
+Write-Host "`nПроверяем эндпоинт здоровья (https://srgolubev.ru/health):" -ForegroundColor Cyan
+try {
+    $response = Invoke-WebRequest -Uri "https://srgolubev.ru/health" -Method Get -ErrorAction SilentlyContinue
+    Write-Host "Эндпоинт здоровья доступен. Статус: $($response.StatusCode) $($response.StatusDescription)" -ForegroundColor Green
+    Write-Host "Ответ: $($response.Content)" -ForegroundColor Green
+} catch {
+    Write-Host "Эндпоинт здоровья недоступен" -ForegroundColor Red
+    Write-Host $_.Exception.Message
+}
+
 Write-Host "`nПроверка завершена." -ForegroundColor Cyan
