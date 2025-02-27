@@ -31,9 +31,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Модель данных для входящего webhook-запроса
-class WebhookRequest(BaseModel):
-    message: str
+# Модель данных для входящего webhook-запроса от Telegram
+class TelegramUpdate(BaseModel):
+    update_id: int
+    message: dict
 
 # Модель данных для ответа
 class WebhookResponse(BaseModel):
@@ -76,60 +77,13 @@ async def verify_telegram_token(x_telegram_bot_api_secret_token: str = Header(No
         raise HTTPException(status_code=403, detail="Неверный секретный токен")
     return True
 
-@app.post("/webhook", response_model=WebhookResponse)
-async def webhook_handler(request: WebhookRequest, verified: bool = Depends(verify_telegram_token)) -> WebhookResponse:
-    """
-    Обработчик webhook-запросов.
-    
-    Args:
-        request: Объект WebhookRequest с полем message
-        verified: Результат проверки секретного токена
-        
-    Returns:
-        WebhookResponse: Объект с результатом обработки
-        
-    Raises:
-        HTTPException: В случае ошибки обработки запроса
-    """
-    try:
-        logger.info("Начало обработки webhook-запроса")
-        logger.debug(f"Получено сообщение: {request.message}")
-        
-        if command_processor is None:
-            error_msg = "CommandProcessor не инициализирован"
-            logger.error(error_msg)
-            raise HTTPException(
-                status_code=500,
-                detail=error_msg
-            )
-        
-        # Обработка команды
-        logger.info("Передача сообщения в CommandProcessor")
-        result = command_processor.process_command(request.message)
-        
-        logger.info("Запрос успешно обработан")
-        logger.debug(f"Результат обработки: {result}")
-        
-        return WebhookResponse(
-            status="success",
-            message=result
-        )
-        
-    except Exception as e:
-        error_msg = f"Ошибка при обработке webhook-запроса: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(
-            status_code=500,
-            detail=error_msg
-        )
-
-@app.post("/webhook/telegram")
-async def telegram_webhook_handler(request: Request, verified: bool = Depends(verify_telegram_token)):
+@app.post("/webhook")
+async def telegram_webhook_handler(update: TelegramUpdate, verified: bool = Depends(verify_telegram_token)):
     """
     Обработчик webhook-запросов от Telegram.
     
     Args:
-        request: Объект Request с данными от Telegram
+        update: Объект с обновлением от Telegram
         verified: Результат проверки секретного токена
         
     Returns:
@@ -137,40 +91,21 @@ async def telegram_webhook_handler(request: Request, verified: bool = Depends(ve
     """
     try:
         logger.info("Начало обработки webhook-запроса от Telegram")
+        logger.debug(f"Получено обновление: {update}")
         
-        # Получаем данные запроса
-        data = await request.json()
-        logger.debug(f"Получены данные от Telegram: {data}")
+        if command_processor is None:
+            error_msg = "CommandProcessor не инициализирован"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
         
-        # Проверяем наличие сообщения
-        if "message" in data and "text" in data["message"]:
-            message_text = data["message"]["text"]
-            user_id = data["message"]["from"]["id"]
-            username = data["message"]["from"].get("username", "unknown")
-            
-            logger.info(f"Получено сообщение от пользователя {username} (ID: {user_id}): {message_text}")
-            
-            if command_processor is None:
-                error_msg = "CommandProcessor не инициализирован"
-                logger.error(error_msg)
-                return {"ok": True}
-            
-            # Обработка команды
-            logger.info("Передача сообщения в CommandProcessor")
-            result = command_processor.process_command(message_text)
-            
-            logger.info("Запрос успешно обработан")
-            logger.debug(f"Результат обработки: {result}")
-            
-            # Здесь можно добавить код для отправки ответа пользователю через Telegram API
-            
-        return {"ok": True}
+        # Обработка сообщения
+        await command_processor.process_message(update.message)
+        
+        return {}
         
     except Exception as e:
-        error_msg = f"Ошибка при обработке webhook-запроса от Telegram: {str(e)}"
-        logger.error(error_msg)
-        # Возвращаем успешный ответ Telegram, чтобы избежать повторных запросов
-        return {"ok": True}
+        logger.error(f"Ошибка при обработке webhook-запроса: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():

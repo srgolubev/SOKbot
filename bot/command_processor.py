@@ -156,3 +156,32 @@ class CommandProcessor:
             error_msg = f"Ошибка при обработке команды: {str(e)}"
             logger.error(error_msg)
             return f"❌ {error_msg}"
+
+    async def process_message(self, message: dict) -> None:
+        """
+        Обрабатывает сообщение от Telegram.
+        
+        Args:
+            message: Словарь с данными сообщения от Telegram
+        """
+        try:
+            logger.info("Начало обработки сообщения от Telegram")
+            logger.debug(f"Получено сообщение: {message}")
+            
+            # Получаем текст сообщения и информацию о чате
+            chat_id = message.get('chat', {}).get('id')
+            text = message.get('text', '')
+            
+            if not chat_id or not text:
+                logger.warning("Получено некорректное сообщение")
+                return
+                
+            logger.info(f"Обработка сообщения от chat_id {chat_id}: {text}")
+            
+            # Здесь будет логика обработки команд
+            # Пока просто логируем
+            logger.info(f"Сообщение успешно получено: {text}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке сообщения: {str(e)}")
+            raise
