@@ -9,7 +9,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from fastapi import FastAPI, HTTPException, Request, Header, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import logging
 import uvicorn
 from bot.command_processor import CommandProcessor
@@ -33,18 +33,20 @@ app = FastAPI(
 )
 
 # Модель данных для сообщения Telegram
+#from pydantic import Field
+
+class TelegramUser(BaseModel):
+    id: int
+    is_bot: bool
+    first_name: str
+    username: Optional[str] = None
+
 class TelegramMessage(BaseModel):
     message_id: int
-    from_: dict
+    from_user: TelegramUser = Field(..., alias="from")  # <-- Исправлено
     chat: dict
     date: int
     text: Optional[str] = None
-
-    class Config:
-        allow_population_by_field_name = True
-        fields = {
-            'from_': 'from'
-        }
 
 # Модель данных для входящего webhook-запроса от Telegram
 class TelegramUpdate(BaseModel):
