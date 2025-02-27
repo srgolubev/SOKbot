@@ -108,12 +108,11 @@ class GoogleSheetsAPI:
                     logger.info("Токен успешно обновлен")
             else:
                 # Запускаем процесс OAuth 2.0
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.client_secrets_file, 
-                    SCOPES
+                from google.oauth2.service_account import Credentials
+                self.credentials = Credentials.from_service_account_file(
+                "/app/credentials/credentials.json",
+                scopes=SCOPES
                 )
-                # Используем локальный сервер для авторизации
-                self.credentials = flow.run_local_server(port=0, open_browser=False)
                 logger.info("Получены новые учетные данные через OAuth 2.0")
                 
                 # Сохраняем учетные данные
