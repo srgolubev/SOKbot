@@ -52,7 +52,9 @@ class GoogleSheetsAPI:
             # Сохраняем токен
             token_path = os.path.join('credentials', 'token.json')
             with open(token_path, 'w') as token:
-                token.write(credentials.to_json())
+                import json
+                json.dump(credentials.to_dict(), token)
+
                 
             logger.info("Учетные данные успешно сохранены")
             
