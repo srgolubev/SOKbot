@@ -2,7 +2,7 @@ import json
 import os
 import logging
 from typing import Dict, Any
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from dotenv import load_dotenv
 
 # Настройка логирования
@@ -31,7 +31,7 @@ class GPTCommandParser:
             api_key = os.getenv('OPENAI_API_KEY')
             if not api_key:
                 raise ValueError("OPENAI_API_KEY не найден в переменных окружения")
-            self.client = OpenAI(api_key=api_key)
+            self.client = AsyncOpenAI(api_key=api_key)
             logger.info("GPT парсер успешно инициализирован")
         except Exception as e:
             logger.error(f"Ошибка при инициализации GPT парсера: {str(e)}")
@@ -45,12 +45,18 @@ class GPTCommandParser:
         - "Создай проект Фестиваль ГТО с разделами аренда, судьи и звук"
         - "Нужна таблица для проекта День города, разделы: сцена, свет, звук"
         - "У нас новый проект Кожаный мяч 2027. Нужны будут флаги, сувенирка, шатры"
+        - "Начинаем проект Марафон 2024, потребуются: регистрация, питание, медики"
         
         Правила обработки команд:
-        1. Если в сообщении упоминается создание проекта/таблицы ИЛИ есть название проекта - устанавливай is_create_table_command в true
-        2. Если проект не найден - верни пустую строку в project_name
-        3. Если разделы не найдены - верни пустой список в sections
-        4. Даже если команда неполная (например, есть только название проекта без разделов), всё равно обрабатывай её
+        1. ВСЕГДА устанавливай is_create_table_command в true, если:
+           - В сообщении есть фразы "новый проект", "создай проект", "нужна таблица", "начинаем проект"
+           - ИЛИ упоминается название проекта с последующим списком разделов/нужных вещей
+           - ИЛИ просто упоминается название проекта (считаем, что пользователь хочет создать таблицу)
+        2. Название проекта - это основное существительное с возможными определениями и годом
+        3. Разделы - это всё, что идёт после фраз "нужны", "нужно", "потребуются", "с разделами", "разделы" или после двоеточия
+        4. Если проект не найден - верни пустую строку в project_name
+        5. Если разделы не найдены - верни пустой список в sections
+        6. Даже если команда неполная (например, есть только название проекта без разделов), всё равно обрабатывай её
         
         ВСЕГДА возвращай JSON строго в таком формате:
         {
@@ -79,24 +85,20 @@ class GPTCommandParser:
             "is_create_table_command": bool
         }
         
-        try:
-            for field, expected_type in required_fields.items():
-                if field not in response:
-                    raise ParsingError(f"В ответе отсутствует обязательное поле '{field}'")
-                if not isinstance(response[field], expected_type):
-                    raise ParsingError(f"Поле '{field}' имеет неверный тип")
-                    
-            # Проверяем, что все элементы в sections являются строками
-            if response["sections"] and not all(isinstance(s, str) for s in response["sections"]):
-                raise ParsingError("Все элементы в списке sections должны быть строками")
+        # Проверяем наличие всех необходимых полей
+        for field, field_type in required_fields.items():
+            if field not in response:
+                raise ParsingError(f"В ответе отсутствует поле {field}")
+            if not isinstance(response[field], field_type):
+                raise ParsingError(f"Поле {field} имеет неверный тип")
                 
-            return response
+        # Проверяем, что все элементы в sections являются строками
+        if response["sections"] and not all(isinstance(s, str) for s in response["sections"]):
+            raise ParsingError("Все элементы в sections должны быть строками")
             
-        except Exception as e:
-            logger.error(f"Ошибка при валидации ответа GPT: {str(e)}")
-            raise ParsingError(f"Ошибка при валидации ответа: {str(e)}")
+        return response
 
-    def parse_command(self, message: str) -> Dict[str, Any]:
+    async def parse_command(self, message: str) -> Dict[str, Any]:
         """
         Анализирует команду пользователя с помощью ChatGPT
         
@@ -110,42 +112,34 @@ class GPTCommandParser:
             ParsingError: При ошибках парсинга или некорректном ответе от API
         """
         try:
-            logger.info(f"Получена команда для парсинга: {message}")
+            logger.info(f"Начало парсинга команды: {message}")
             
-            # Проверяем входные данные
-            if not message or not isinstance(message, str) or message.strip() == "":
-                raise ParsingError("Получено пустое или некорректное сообщение")
+            response = await self.client.chat.completions.create(
+                model="gpt-3.5-turbo-1106",
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": message}
+                ]
+            )
             
-            # Отправляем запрос к GPT
-            try:
-                response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": message}
-                    ],
-                    temperature=0.1,
-                    max_tokens=150
-                )
-            except Exception as e:
-                logger.error(f"Ошибка при запросе к API OpenAI: {str(e)}")
-                raise ParsingError(f"Ошибка при обращении к API OpenAI: {str(e)}")
-            
-            # Получаем и парсим ответ
+            # Получаем ответ от GPT
             try:
                 result = json.loads(response.choices[0].message.content)
+                logger.info(f"Получен ответ от GPT: {result}")
             except json.JSONDecodeError as e:
-                logger.error(f"Ошибка при парсинге JSON ответа от GPT: {str(e)}")
-                raise ParsingError("Получен некорректный JSON от GPT")
+                raise ParsingError(f"Ошибка при разборе JSON ответа: {str(e)}")
             
-            # Валидируем ответ
+            # Проверяем и нормализуем ответ
             validated_result = self.validate_response(result)
-            logger.info(f"Успешно обработана команда. Результат: {validated_result}")
+            logger.info(f"Команда успешно разобрана: {validated_result}")
+            
             return validated_result
             
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при обработке команды: {str(e)}")
-            raise ParsingError(f"Неожиданная ошибка при обработке команды: {str(e)}")
+            error_msg = f"Неожиданная ошибка при обработке команды: {str(e)}"
+            logger.error(error_msg)
+            raise ParsingError(error_msg)
 
 # Пример использования
 if __name__ == "__main__":
