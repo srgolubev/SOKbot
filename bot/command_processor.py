@@ -184,27 +184,18 @@ class CommandProcessor:
                 "sections": sections
             }
             
-            logger.info(f"Создание листа проекта с данными: {json.dumps(project_data, ensure_ascii=False)}")
+            logger.info(f"Создание листа проекта с данными: {json.dumps({'project_name': project_name, 'sections': sections}, ensure_ascii=False)}")
             
             try:
                 # Создаем лист проекта
-                sheet_id = self.sheets_api.create_project_sheet(project_data)
-                logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
-                
-                success_message = f"""
-                ✅ Лист проекта успешно создан!
-                
-                📋 Название проекта: {project_name}
-                📑 Разделы: {', '.join(sections)}
-                🔗 ID листа: {sheet_id}
-                """
-                
-                logger.info("Команда успешно обработана")
-                return success_message
-            except Exception as sheet_error:
-                error_msg = f"Ошибка при создании листа проекта: {str(sheet_error)}"
-                logger.error(error_msg)
-                return f"❌ {error_msg}"
+                sheet_url = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
+                if sheet_url:
+                    return f"Создан новый лист проекта '{project_name}'.\nСсылка: {sheet_url}"
+                else:
+                    return f"Лист с названием '{project_name}' уже существует."
+            except Exception as e:
+                logger.error(f"Ошибка при создании листа проекта: {str(e)}")
+                return "Произошла ошибка при создании листа проекта. Пожалуйста, попробуйте позже."
             
         except Exception as e:
             error_msg = f"Ошибка при обработке команды: {str(e)}"
