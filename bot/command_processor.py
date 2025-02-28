@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from openai import OpenAI
 from dotenv import load_dotenv
 from .sheets_api import GoogleSheetsAPI
@@ -76,83 +76,52 @@ class CommandProcessor:
             logger.error(f"Ошибка подключения к Telegram: {str(e)}")
             raise
 
-    def _extract_project_info(self, message: str) -> Tuple[Optional[str], Optional[List[str]]]:
+    async def _extract_project_info(self, message: str) -> Optional[Dict[str, Any]]:
         """
-        Извлекает информацию о проекте из сообщения с помощью ChatGPT.
+        Извлекает информацию о проекте из сообщения пользователя используя GPT
         
         Args:
             message: Текст сообщения от пользователя
             
         Returns:
-            Tuple[Optional[str], Optional[List[str]]]: Кортеж (название проекта, список разделов)
+            Optional[Dict[str, Any]]: Словарь с информацией о проекте или None в случае ошибки
         """
         try:
-            logger.info(f"Начало извлечения информации из сообщения: {message}")
-            
-            # Формируем промпт для ChatGPT
             prompt = f"""
-            Ты - помощник для извлечения информации о проекте из текста.
+            Извлеки из текста название проекта и список разделов для создания таблицы.
+            Разделы должны быть релевантны контексту проекта.
             
-            Пользователь может использовать разные формулировки для создания проекта, например:
-            - "Создай проект X с разделами A, B, C"
-            - "Сделай таблицу X с разделами A и B"
-            - "Нужна таблица для проекта X с разделами A, B"
+            Текст: {message}
             
-            Тебе нужно извлечь:
-            1. Название проекта
-            2. Список разделов или категорий
-            
-            Если в тексте есть слова "с разделами", используй то что после них как разделы.
-            Если разделы перечислены через "и" или запятую - раздели их.
-            
-            Верни ответ строго в формате JSON:
+            Формат ответа (строго):
             {{
-                "project_name": "название проекта",
-                "sections": ["раздел1", "раздел2", ...]
+                "project_name": "Название проекта",
+                "sections": ["Раздел 1", "Раздел 2", ...]
             }}
-            
-            Примеры:
-            
-            Входное сообщение: 'Создай проект "Ремонт офиса" с разделами организация, материалы, работы'
-            Ответ: {{"project_name": "Ремонт офиса", "sections": ["организация", "материалы", "работы"]}}
-            
-            Входное сообщение: 'Сделай таблицу Фестиваль красок с волонтерами и фотографами'
-            Ответ: {{"project_name": "Фестиваль красок", "sections": ["волонтеры", "фотографы"]}}
-            
-            Если формат сообщения совсем не соответствует - верни null.
-            
-            Текст для обработки: {message}
             """
             
-            logger.debug(f"Подготовлен промпт для ChatGPT: {prompt}")
-            
-            # Отправляем запрос в ChatGPT
-            logger.info("Отправка запроса в ChatGPT API")
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo-1106",
+                response_format={ "type": "json" },
                 messages=[
-                    {"role": "system", "content": "Ты - помощник для извлечения структурированной информации из текста."},
+                    {"role": "system", "content": "Ты помощник для извлечения информации о проекте из текста"},
                     {"role": "user", "content": prompt}
                 ]
             )
             
-            # Парсим ответ
+            # Извлекаем JSON из ответа
             result = json.loads(response.choices[0].message.content)
-            logger.info(f"Получен и разобран ответ от ChatGPT: {json.dumps(result, ensure_ascii=False)}")
             
-            # Проверяем корректность данных
-            if not result or not result.get("project_name") or not result.get("sections"):
-                logger.warning("ChatGPT вернул неполные данные или null")
-                return None, None
+            # Проверяем обязательные поля
+            if not result.get('project_name') or not result.get('sections'):
+                logger.error("GPT вернул неполный ответ")
+                return None
+                
+            return result
             
-            return result["project_name"], result["sections"]
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Ошибка при разборе JSON-ответа от ChatGPT: {str(e)}")
-            return None, None
         except Exception as e:
             logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
-            return None, None
+            return None
 
     async def process_command(self, chat_id: int, command: str) -> None:
         """
@@ -164,7 +133,7 @@ class CommandProcessor:
         """
         try:
             # Извлекаем информацию о проекте из команды
-            project_info = await self.extract_project_info(command)
+            project_info = await self._extract_project_info(command)
             if not project_info:
                 await self.bot.send_message(
                     chat_id=chat_id,
