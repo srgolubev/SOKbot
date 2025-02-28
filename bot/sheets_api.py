@@ -641,7 +641,7 @@ class GoogleSheetsAPI:
         """
         try:
             # Проверяем, существует ли уже лист с таким названием
-            existing_sheets = self._read_range("A1:A")
+            existing_sheets = self.read_values("A1:A")  # Используем публичный метод
             if existing_sheets and project_name in [row[0] for row in existing_sheets if row]:
                 logger.warning(f"Лист с названием '{project_name}' уже существует")
                 return None
@@ -681,7 +681,7 @@ class GoogleSheetsAPI:
                     ).execute()
 
                     # Форматируем лист
-                    self._format_project_sheet(project_name, sections)
+                    self.format_project_sheet(project_name, sections)  # Используем публичный метод
                     
                     # Возвращаем URL листа
                     return f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={new_sheet_index}"
