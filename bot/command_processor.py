@@ -154,53 +154,56 @@ class CommandProcessor:
             logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
             return None, None
 
-    def process_command(self, message: str) -> str:
+    async def process_command(self, chat_id: int, command: str) -> None:
         """
-        Обрабатывает команду пользователя.
+        Обрабатывает команду от пользователя
         
         Args:
-            message: Текст сообщения от пользователя
-            
-        Returns:
-            str: Ответное сообщение для пользователя
+            chat_id: ID чата
+            command: Текст команды
         """
         try:
-            logger.info(f"Начало обработки команды: {message}")
-            
-            # Извлекаем информацию о проекте
-            logger.info("Извлечение информации о проекте из сообщения")
-            project_name, sections = self._extract_project_info(message)
-            
-            if not project_name or not sections:
-                error_msg = "Не удалось извлечь информацию о проекте из сообщения. Пожалуйста, сформулируйте иначе."
-                logger.error(error_msg)
-                return error_msg
-            
-            logger.info(f"Извлечена информация: project_name='{project_name}', sections={sections}")
-            
-            # Формируем данные проекта
-            project_data = {
-                "project_name": project_name,
-                "sections": sections
-            }
-            
-            logger.info(f"Создание листа проекта с данными: {json.dumps({'project_name': project_name, 'sections': sections}, ensure_ascii=False)}")
-            
-            try:
-                # Создаем лист проекта
-                sheet_url = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
-                if sheet_url:
-                    return f"Создан новый лист проекта '{project_name}'.\nСсылка: {sheet_url}"
-                else:
-                    return f"Лист с названием '{project_name}' уже существует."
-            except Exception as e:
-                logger.error(f"Ошибка при создании листа проекта: {str(e)}")
-                return "Произошла ошибка при создании листа проекта. Пожалуйста, попробуйте позже."
-            
+            # Извлекаем информацию о проекте из команды
+            project_info = await self.extract_project_info(command)
+            if not project_info:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text="Не удалось извлечь информацию о проекте из команды. Пожалуйста, попробуйте переформулировать."
+                )
+                return
+
+            project_name = project_info['project_name']
+            sections = project_info['sections']
+
+            # Создаем лист проекта
+            sheet_url = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
+            if sheet_url:
+                # Получаем фактическое имя листа из URL
+                sheet_name = sheet_url.split('=')[-1]  # Получаем gid
+                sheet_info = self.sheets_api.get_sheet_info(sheet_name)
+                actual_name = sheet_info['title'] if sheet_info else project_name
+                
+                message = f"Создан новый лист проекта"
+                if actual_name != project_name:
+                    message += f" (имя изменено на '{actual_name}', так как '{project_name}' уже существует)"
+                message += f".\nСсылка: {sheet_url}"
+                
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message
+                )
+            else:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Не удалось создать лист проекта. Пожалуйста, попробуйте позже."
+                )
+
         except Exception as e:
-            error_msg = f"Ошибка при обработке команды: {str(e)}"
-            logger.error(error_msg)
-            return f"❌ {error_msg}"
+            logger.error(f"Ошибка при обработке команды: {str(e)}")
+            await self.bot.send_message(
+                chat_id=chat_id,
+                text="Произошла ошибка при обработке команды. Пожалуйста, попробуйте позже."
+            )
 
     async def send_telegram_message(self, chat_id: int, text: str) -> None:
         """
@@ -253,8 +256,7 @@ class CommandProcessor:
                 return
             
             # Обрабатываем команду создания проекта
-            response = self.process_command(text)
-            await self.send_telegram_message(chat_id, response)
+            await self.process_command(chat_id, text)
             
             logger.info(f"Сообщение успешно обработано: {text}")
             
