@@ -102,7 +102,7 @@ class CommandProcessor:
             
             response = await self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo-1106",
-                response_format={ "type": "json" },
+                response_format={ "type": "json_object" },
                 messages=[
                     {"role": "system", "content": "Ты помощник для извлечения информации о проекте из текста"},
                     {"role": "user", "content": prompt}
@@ -110,7 +110,7 @@ class CommandProcessor:
             )
             
             # Извлекаем JSON из ответа
-            result = json.loads(response.choices[0].message.content)
+            result = response
             
             # Проверяем обязательные поля
             if not result.get('project_name') or not result.get('sections'):
