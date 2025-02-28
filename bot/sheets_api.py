@@ -33,110 +33,25 @@ class GoogleSheetsAPI:
         self.credentials = None
         self.service = None
         
-        # Путь к файлу с секретами клиента
-        self.client_secrets_file = os.path.join('credentials', 'client_secrets.json')
-        if not os.path.exists(self.client_secrets_file):
-            raise FileNotFoundError(f"Файл {self.client_secrets_file} не найден")
-
-    def _save_credentials(self, credentials: Credentials) -> None:
-        """
-        Сохраняет учетные данные в файл token.json
-        
-        Args:
-            credentials: Объект с учетными данными
-        """
-        try:
-            # Создаем директорию для токена, если её нет
-            os.makedirs('credentials', exist_ok=True)
-            
-            # Сохраняем токен
-            token_path = os.path.join('credentials', 'token.json')
-            with open(token_path, 'w') as token:
-                import json
-                if isinstance(credentials, Credentials):
-                    json.dump(credentials.to_json(), token)
-                else:
-                    logger.warning("Пропущено сохранение учетных данных, так как используется сервисный аккаунт.")
-            
-            logger.info("Учетные данные успешно сохранены")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении учетных данных: {str(e)}")
-            raise
-
-    def _load_credentials(self) -> Optional[Credentials]:
-        """
-        Загружает сохраненные учетные данные из файла token.json
-        
-        Returns:
-            Optional[Credentials]: Объект с учетными данными или None, если файл не найден
-        """
-        try:
-            token_path = os.path.join('credentials', 'token.json')
-            if not os.path.exists(token_path):
-                logger.info("Файл token.json не найден")
-                return None
-                
-            try:
-                with open(token_path, 'r') as token:
-                    creds_data = json.load(token)
-            except json.JSONDecodeError as e:
-                logger.error(f"Ошибка при чтении token.json: {str(e)}")
-                # Файл поврежден, удаляем его
-                os.remove(token_path)
-                return None
-                
-            from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-            if "type" in creds_data and creds_data["type"] == "service_account":
-                try:
-                    credentials = ServiceAccountCredentials.from_service_account_info(creds_data)
-                    logger.info("Учетные данные сервисного аккаунта успешно загружены")
-                    return credentials
-                except Exception as e:
-                    logger.error(f"Ошибка при создании учетных данных сервисного аккаунта: {str(e)}")
-                    return None
-            else:
-                try:
-                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
-                    logger.info("Учетные данные пользователя успешно загружены")
-                    return credentials
-                except Exception as e:
-                    logger.error(f"Ошибка при создании учетных данных пользователя: {str(e)}")
-                    return None
-                    
-        except Exception as e:
-            logger.error(f"Неожиданная ошибка при загрузке учетных данных: {str(e)}")
-            return None
+        # Путь к файлу с учетными данными сервисного аккаунта
+        self.credentials_file = os.path.join('credentials', 'credentials.json')
+        if not os.path.exists(self.credentials_file):
+            raise FileNotFoundError(f"Файл {self.credentials_file} не найден")
 
     def authenticate(self) -> None:
         """
-        Выполняет аутентификацию с Google Sheets API
+        Выполняет аутентификацию с Google Sheets API через сервисный аккаунт
         """
         try:
-            # Пытаемся загрузить существующие учетные данные
-            self.credentials = self._load_credentials()
+            logger.info("Начало аутентификации через сервисный аккаунт")
             
-            # Если учетные данные не найдены или недействительны
-            if not self.credentials:
-                logger.info("Получаем новые учетные данные через OAuth 2.0")
-                
-                # Загружаем конфигурацию клиента
-                with open(self.client_secrets_file, 'r') as f:
-                    client_config = json.load(f)
-                
-                # Проверяем, есть ли данные сервисного аккаунта
-                if "type" in client_config and client_config["type"] == "service_account":
-                    from google.oauth2.service_account import Credentials
-                    self.credentials = Credentials.from_service_account_info(client_config)
-                    logger.info("Использован сервисный аккаунт для аутентификации")
-                else:
-                    # Используем OAuth 2.0 для обычного пользователя
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        self.client_secrets_file, SCOPES)
-                    self.credentials = flow.run_local_server(port=0)
-                    logger.info("Использован OAuth 2.0 для аутентификации")
-                    # Сохраняем учетные данные только для обычного пользователя
-                    self._save_credentials(self.credentials)
+            # Загружаем учетные данные сервисного аккаунта
+            from google.oauth2.service_account import Credentials
+            self.credentials = Credentials.from_service_account_file(
+                self.credentials_file,
+                scopes=SCOPES
+            )
+            logger.info("Учетные данные сервисного аккаунта успешно загружены")
             
             # Создаем сервисный объект
             self.service = build('sheets', 'v4', credentials=self.credentials)
