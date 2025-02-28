@@ -110,7 +110,7 @@ class CommandProcessor:
             )
             
             # Извлекаем JSON из ответа
-            result = response
+            result = json.loads(response.choices[0].message.content)
             
             # Проверяем обязательные поля
             if not result.get('project_name') or not result.get('sections'):
