@@ -91,14 +91,31 @@ class CommandProcessor:
             
             # Формируем промпт для ChatGPT
             prompt = f"""
-            Извлеки из текста название проекта и список разделов.
-            Верни ответ в формате JSON:
+            Ты - помощник для извлечения информации о проекте из текста.
+            
+            Формат входного сообщения:
+            "Создай проект <название проекта> с разделами <список разделов через запятую>"
+            
+            Тебе нужно извлечь:
+            1. Название проекта (в кавычках)
+            2. Список разделов (после "с разделами")
+            
+            Верни ответ строго в формате JSON:
             {{
                 "project_name": "название проекта",
                 "sections": ["раздел1", "раздел2", ...]
             }}
             
-            Текст: {message}
+            Если формат сообщения не соответствует шаблону или информация неполная - верни null.
+            
+            Примеры:
+            Входное сообщение: 'Создай проект "Ремонт офиса" с разделами организация, материалы, работы'
+            Ответ: {{"project_name": "Ремонт офиса", "sections": ["организация", "материалы", "работы"]}}
+            
+            Входное сообщение: 'Создай проект "Тестовый проект" с разделами организация, техника, персонал'
+            Ответ: {{"project_name": "Тестовый проект", "sections": ["организация", "техника", "персонал"]}}
+            
+            Текст для обработки: {message}
             """
             
             logger.debug(f"Подготовлен промпт для ChatGPT: {prompt}")
@@ -108,7 +125,7 @@ class CommandProcessor:
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "Ты - помощник, который извлекает структурированную информацию из текста."},
+                    {"role": "system", "content": "Ты - помощник для извлечения структурированной информации из текста."},
                     {"role": "user", "content": prompt}
                 ]
             )
@@ -118,8 +135,9 @@ class CommandProcessor:
             logger.info(f"Получен и разобран ответ от ChatGPT: {json.dumps(result, ensure_ascii=False)}")
             
             # Проверяем корректность данных
-            if not result.get("project_name") or not result.get("sections"):
-                raise ValueError("ChatGPT вернул неполные данные")
+            if not result or not result.get("project_name") or not result.get("sections"):
+                logger.warning("ChatGPT вернул неполные данные или null")
+                return None, None
             
             return result["project_name"], result["sections"]
             
