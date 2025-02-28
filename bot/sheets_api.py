@@ -1,11 +1,13 @@
 import os
 import json
 import logging
-from typing import Optional
+import time
+from typing import Optional, List
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -622,6 +624,76 @@ class GoogleSheetsAPI:
             logger.info(f"Создан лист проекта '{project_data['project_name']}' с ID: {new_sheet_id}")
             return new_sheet_id
             
+        except Exception as e:
+            logger.error(f"Ошибка при создании листа проекта: {str(e)}")
+            raise
+
+    def create_project_sheet_with_retry(self, project_name: str, sections: List[str]) -> Optional[str]:
+        """
+        Создает новый лист проекта с заданными разделами.
+        
+        Args:
+            project_name: Название проекта
+            sections: Список разделов проекта
+            
+        Returns:
+            Optional[str]: URL созданного листа или None в случае ошибки
+        """
+        try:
+            # Проверяем, существует ли уже лист с таким названием
+            existing_sheets = self._read_range("A1:A")
+            if existing_sheets and project_name in [row[0] for row in existing_sheets if row]:
+                logger.warning(f"Лист с названием '{project_name}' уже существует")
+                return None
+
+            max_retries = 3
+            retry_delay = 2  # секунды
+            
+            for attempt in range(max_retries):
+                try:
+                    # Создаем новый лист
+                    sheet_metadata = self.service.spreadsheets().get(
+                        spreadsheetId=self.spreadsheet_id
+                    ).execute()
+
+                    # Получаем следующий доступный индекс для нового листа
+                    sheet_count = len(sheet_metadata.get('sheets', []))
+                    new_sheet_index = sheet_count
+
+                    # Создаем запрос на добавление листа
+                    requests = [{
+                        'addSheet': {
+                            'properties': {
+                                'title': project_name,
+                                'index': new_sheet_index,
+                                'gridProperties': {
+                                    'rowCount': 1000,
+                                    'columnCount': 26
+                                }
+                            }
+                        }
+                    }]
+
+                    # Применяем запрос
+                    self.service.spreadsheets().batchUpdate(
+                        spreadsheetId=self.spreadsheet_id,
+                        body={'requests': requests}
+                    ).execute()
+
+                    # Форматируем лист
+                    self._format_project_sheet(project_name, sections)
+                    
+                    # Возвращаем URL листа
+                    return f"https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}/edit#gid={new_sheet_index}"
+                
+                except HttpError as e:
+                    if e.resp.status == 503 and attempt < max_retries - 1:  # Если это не последняя попытка
+                        logger.warning(f"Попытка {attempt + 1} не удалась из-за недоступности сервиса. Ожидание {retry_delay} сек.")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Увеличиваем время ожидания для следующей попытки
+                        continue
+                    raise  # Если это последняя попытка или другая ошибка - пробрасываем исключение
+                    
         except Exception as e:
             logger.error(f"Ошибка при создании листа проекта: {str(e)}")
             raise
