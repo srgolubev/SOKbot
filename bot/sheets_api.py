@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import time
 from typing import Optional, List
@@ -57,8 +56,12 @@ class GoogleSheetsAPI:
             logger.info("Учетные данные сервисного аккаунта успешно загружены")
             
             # Создаем сервисный объект
-            self.service = build('sheets', 'v4', credentials=self.credentials)
-            logger.info("Сервисный объект успешно создан")
+            try:
+                self.service = build('sheets', 'v4', credentials=self.credentials)
+                logger.info("Сервисный объект успешно создан")
+            except Exception as e:
+                logger.error(f"Ошибка при создании сервисного объекта: {str(e)}")
+                raise
             
         except Exception as e:
             logger.error(f"Ошибка при аутентификации: {str(e)}")
@@ -66,7 +69,10 @@ class GoogleSheetsAPI:
 
     def get_service(self):
         """
-        Возвращает сервисный объект для работы с Google Sheets API
+        Возвращает сервисный объект для работы с Google Sheets API.
+        
+        Этот метод возвращает сервисный объект, который можно использовать для взаимодействия с Google Sheets API.
+        Сервисный объект должен быть создан до вызова этого метода, иначе будет возбуждено исключение.
         
         Returns:
             Resource: Сервисный объект Google Sheets API
@@ -154,7 +160,10 @@ class GoogleSheetsAPI:
 
     def create_new_sheet(self, spreadsheet_id: str, sheet_name: str) -> int:
         """
-        Создает новый лист в указанной таблице с базовым форматированием
+        Создает новый лист в указанной таблице с базовым форматированием.
+        
+        Этот метод создает новый лист в таблице с заданным именем и базовым форматированием.
+        Базовое форматирование включает в себя закрепление первой строки, установку ширины столбцов и форматирование заголовков.
         
         Args:
             spreadsheet_id: ID таблицы
@@ -184,12 +193,26 @@ class GoogleSheetsAPI:
                                 }
                             }
                         }
-                    },
-                    # Применяем базовое форматирование к заголовкам
+                    }
+                ]
+            }
+            
+            # Выполняем запрос на добавление листа
+            response = self.service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body=request_body
+            ).execute()
+            
+            # Получаем ID созданного листа
+            sheet_id = response['replies'][0]['addSheet']['properties']['sheetId']
+            
+            # Применяем базовое форматирование к заголовкам
+            format_request = {
+                'requests': [
                     {
                         'repeatCell': {
                             'range': {
-                                'sheetId': '{{sheetsId}}',  # Будет заменено после создания листа
+                                'sheetId': sheet_id,
                                 'startRowIndex': 0,
                                 'endRowIndex': 1
                             },
@@ -215,7 +238,7 @@ class GoogleSheetsAPI:
                     {
                         'autoResizeDimensions': {
                             'dimensions': {
-                                'sheetId': '{{sheetsId}}',
+                                'sheetId': sheet_id,
                                 'dimension': 'COLUMNS',
                                 'startIndex': 0,
                                 'endIndex': 26
@@ -225,31 +248,11 @@ class GoogleSheetsAPI:
                 ]
             }
             
-            # Выполняем первый запрос для создания листа
-            response = self.service.spreadsheets().batchUpdate(
+            # Выполняем запрос на форматирование
+            self.service.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
-                body={'requests': [request_body['requests'][0]]}
+                body=format_request
             ).execute()
-            
-            # Получаем ID созданного листа
-            sheet_id = response['replies'][0]['addSheet']['properties']['sheetId']
-            
-            # Заменяем placeholder на реальный ID листа
-            formatted_requests = []
-            for request in request_body['requests'][1:]:
-                # Преобразуем запрос в строку для замены
-                request_str = str(request)
-                # Заменяем placeholder на реальный ID
-                request_str = request_str.replace("'{{sheetsId}}'", str(sheet_id))
-                # Преобразуем обратно в словарь и добавляем в список
-                formatted_requests.append(eval(request_str))
-            
-            # Выполняем второй запрос для форматирования
-            if formatted_requests:
-                self.service.spreadsheets().batchUpdate(
-                    spreadsheetId=spreadsheet_id,
-                    body={'requests': formatted_requests}
-                ).execute()
             
             logger.info(f"Создан новый лист '{sheet_name}' с ID: {sheet_id}")
             return sheet_id
