@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 from .sheets_api import GoogleSheetsAPI
+import telegram
 
 # Настройка логирования
 logging.basicConfig(
@@ -33,10 +34,20 @@ class CommandProcessor:
             # Проверяем наличие необходимых переменных окружения
             if not os.getenv('OPENAI_API_KEY'):
                 raise ValueError("Не найден OPENAI_API_KEY в переменных окружения")
+            if not os.getenv('TELEGRAM_TOKEN'):
+                raise ValueError("Не найден TELEGRAM_TOKEN в переменных окружения")
             
             # Инициализируем клиент OpenAI
             self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             logger.info("OpenAI клиент инициализирован")
+            
+            # Инициализируем клиент Telegram
+            self.bot = telegram.Bot(token=os.getenv('TELEGRAM_TOKEN'))
+            logger.info("Telegram бот инициализирован")
+            
+            # Проверяем подключение к Telegram
+            import asyncio
+            asyncio.run(self._check_telegram_connection())
             
             # Инициализируем клиент Google Sheets
             self.sheets_api = GoogleSheetsAPI()
@@ -50,6 +61,15 @@ class CommandProcessor:
             
         except Exception as e:
             logger.error(f"Ошибка при инициализации CommandProcessor: {str(e)}")
+            raise
+
+    async def _check_telegram_connection(self) -> None:
+        """Проверяет подключение к Telegram API"""
+        try:
+            me = await self.bot.get_me()
+            logger.info(f"Подключение к Telegram успешно. Имя бота: {me.first_name}")
+        except Exception as e:
+            logger.error(f"Ошибка подключения к Telegram: {str(e)}")
             raise
 
     def _extract_project_info(self, message: str) -> Tuple[Optional[str], Optional[List[str]]]:
@@ -120,6 +140,7 @@ class CommandProcessor:
             logger.info(f"Начало обработки команды: {message}")
             
             # Извлекаем информацию о проекте
+            logger.info("Извлечение информации о проекте из сообщения")
             project_name, sections = self._extract_project_info(message)
             
             if not project_name or not sections:
@@ -137,25 +158,45 @@ class CommandProcessor:
             
             logger.info(f"Создание листа проекта с данными: {json.dumps(project_data, ensure_ascii=False)}")
             
-            # Создаем лист проекта
-            sheet_id = self.sheets_api.create_project_sheet(project_data)
-            logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
-            
-            success_message = f"""
-            ✅ Лист проекта успешно создан!
-            
-            📋 Название проекта: {project_name}
-            📑 Разделы: {', '.join(sections)}
-            🔗 ID листа: {sheet_id}
-            """
-            
-            logger.info("Команда успешно обработана")
-            return success_message
+            try:
+                # Создаем лист проекта
+                sheet_id = self.sheets_api.create_project_sheet(project_data)
+                logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
+                
+                success_message = f"""
+                ✅ Лист проекта успешно создан!
+                
+                📋 Название проекта: {project_name}
+                📑 Разделы: {', '.join(sections)}
+                🔗 ID листа: {sheet_id}
+                """
+                
+                logger.info("Команда успешно обработана")
+                return success_message
+            except Exception as sheet_error:
+                error_msg = f"Ошибка при создании листа проекта: {str(sheet_error)}"
+                logger.error(error_msg)
+                return f"❌ {error_msg}"
             
         except Exception as e:
             error_msg = f"Ошибка при обработке команды: {str(e)}"
             logger.error(error_msg)
             return f"❌ {error_msg}"
+
+    async def send_telegram_message(self, chat_id: int, text: str) -> None:
+        """
+        Отправляет сообщение пользователю в Telegram.
+        
+        Args:
+            chat_id: ID чата
+            text: Текст сообщения
+        """
+        try:
+            await self.bot.send_message(chat_id=chat_id, text=text)
+            logger.info(f"Сообщение успешно отправлено в чат {chat_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения в Telegram: {str(e)}")
+            raise
 
     async def process_message(self, message: dict) -> None:
         """
@@ -169,8 +210,8 @@ class CommandProcessor:
             logger.debug(f"Получено сообщение: {message}")
             
             # Получаем текст сообщения и информацию о чате
-            chat_id = message.chat["id"]  # chat - это dict внутри TelegramMessage
-            text = message.text or ""  # text - это строка или None
+            chat_id = message.chat["id"]
+            text = message.text or ""
             
             if not chat_id or not text:
                 logger.warning("Получено некорректное сообщение")
@@ -178,10 +219,27 @@ class CommandProcessor:
                 
             logger.info(f"Обработка сообщения от chat_id {chat_id}: {text}")
             
-            # Здесь будет логика обработки команд
-            # Пока просто логируем
-            logger.info(f"Сообщение успешно получено: {text}")
+            # Если это команда /start
+            if text == '/start':
+                welcome_message = """
+                👋 Привет! Я бот для создания проектных листов в Google Sheets.
+                
+                📝 Чтобы создать новый проект, напиши мне сообщение в формате:
+                Создай проект "Название проекта" с разделами раздел1, раздел2, раздел3
+                
+                Например:
+                Создай проект "Ремонт офиса" с разделами организация, материалы, работы
+                """
+                await self.send_telegram_message(chat_id, welcome_message)
+                return
+            
+            # Обрабатываем команду создания проекта
+            response = self.process_command(text)
+            await self.send_telegram_message(chat_id, response)
+            
+            logger.info(f"Сообщение успешно обработано: {text}")
             
         except Exception as e:
-            logger.error(f"Ошибка при обработке сообщения: {str(e)}")
-            raise
+            error_message = f"❌ Произошла ошибка при обработке команды: {str(e)}"
+            logger.error(error_message)
+            await self.send_telegram_message(chat_id, error_message)

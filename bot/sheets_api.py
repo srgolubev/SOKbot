@@ -73,21 +73,39 @@ class GoogleSheetsAPI:
         """
         try:
             token_path = os.path.join('credentials', 'token.json')
-            if os.path.exists(token_path):
+            if not os.path.exists(token_path):
+                logger.info("Файл token.json не найден")
+                return None
+                
+            try:
                 with open(token_path, 'r') as token:
                     creds_data = json.load(token)
-                    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-                    if "type" in creds_data and creds_data["type"] == "service_account":
-                        credentials = ServiceAccountCredentials.from_service_account_info(creds_data)
-                    else:
-                        credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
-                    logger.info("Учетные данные успешно загружены")
+            except json.JSONDecodeError as e:
+                logger.error(f"Ошибка при чтении token.json: {str(e)}")
+                # Файл поврежден, удаляем его
+                os.remove(token_path)
+                return None
+                
+            from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+            if "type" in creds_data and creds_data["type"] == "service_account":
+                try:
+                    credentials = ServiceAccountCredentials.from_service_account_info(creds_data)
+                    logger.info("Учетные данные сервисного аккаунта успешно загружены")
                     return credentials
+                except Exception as e:
+                    logger.error(f"Ошибка при создании учетных данных сервисного аккаунта: {str(e)}")
+                    return None
+            else:
+                try:
+                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
+                    logger.info("Учетные данные пользователя успешно загружены")
+                    return credentials
+                except Exception as e:
+                    logger.error(f"Ошибка при создании учетных данных пользователя: {str(e)}")
+                    return None
                     
-            return None
-            
         except Exception as e:
-            logger.error(f"Ошибка при загрузке учетных данных: {str(e)}")
+            logger.error(f"Неожиданная ошибка при загрузке учетных данных: {str(e)}")
             return None
 
     def authenticate(self) -> None:
