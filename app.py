@@ -76,6 +76,7 @@ async def startup_event():
     try:
         logger.info("Начало инициализации приложения")
         command_processor = CommandProcessor()
+        await command_processor.initialize()
         logger.info("CommandProcessor успешно инициализирован")
     except Exception as e:
         logger.error(f"Ошибка при инициализации приложения: {str(e)}")

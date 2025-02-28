@@ -45,10 +45,6 @@ class CommandProcessor:
             self.bot = telegram.Bot(token=os.getenv('TELEGRAM_TOKEN'))
             logger.info("Telegram бот инициализирован")
             
-            # Проверяем подключение к Telegram
-            import asyncio
-            asyncio.run(self._check_telegram_connection())
-            
             # Инициализируем клиент Google Sheets
             self.sheets_api = GoogleSheetsAPI()
             logger.info("Google Sheets API клиент создан")
@@ -61,6 +57,14 @@ class CommandProcessor:
             
         except Exception as e:
             logger.error(f"Ошибка при инициализации CommandProcessor: {str(e)}")
+            raise
+
+    async def initialize(self) -> None:
+        """Асинхронная инициализация и проверка подключений"""
+        try:
+            await self._check_telegram_connection()
+        except Exception as e:
+            logger.error(f"Ошибка при асинхронной инициализации: {str(e)}")
             raise
 
     async def _check_telegram_connection(self) -> None:
