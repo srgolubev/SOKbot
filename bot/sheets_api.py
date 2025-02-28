@@ -111,38 +111,32 @@ class GoogleSheetsAPI:
     def authenticate(self) -> None:
         """
         Выполняет аутентификацию с Google Sheets API
-        
-        Процесс аутентификации:
-        1. Пытается загрузить существующие учетные данные
-        2. Проверяет, действительны ли они
-        3. Если нет - запускает процесс OAuth 2.0
-        4. Сохраняет новые учетные данные
-        5. Создает сервисный объект для работы с API
-        
-        Raises:
-            Exception: Если произошла ошибка при аутентификации
         """
         try:
             # Пытаемся загрузить существующие учетные данные
             self.credentials = self._load_credentials()
             
-            # Если учетные данные есть и они валидны
-            if self.credentials and self.credentials.valid:
-                if self.credentials.expired and self.credentials.refresh_token:
-                    # Обновляем токен, если он истек
-                    self.credentials.refresh(Request())
-                    logger.info("Токен успешно обновлен")
-            else:
-                # Запускаем процесс OAuth 2.0
-                from google.oauth2.service_account import Credentials
-                self.credentials = Credentials.from_service_account_file(
-                "/app/credentials/credentials.json",
-                scopes=SCOPES
-                )
-                logger.info("Получены новые учетные данные через OAuth 2.0")
+            # Если учетные данные не найдены или недействительны
+            if not self.credentials:
+                logger.info("Получаем новые учетные данные через OAuth 2.0")
                 
-                # Сохраняем учетные данные
-                self._save_credentials(self.credentials)
+                # Загружаем конфигурацию клиента
+                with open(self.client_secrets_file, 'r') as f:
+                    client_config = json.load(f)
+                
+                # Проверяем, есть ли данные сервисного аккаунта
+                if "type" in client_config and client_config["type"] == "service_account":
+                    from google.oauth2.service_account import Credentials
+                    self.credentials = Credentials.from_service_account_info(client_config)
+                    logger.info("Использован сервисный аккаунт для аутентификации")
+                else:
+                    # Используем OAuth 2.0 для обычного пользователя
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        self.client_secrets_file, SCOPES)
+                    self.credentials = flow.run_local_server(port=0)
+                    logger.info("Использован OAuth 2.0 для аутентификации")
+                    # Сохраняем учетные данные только для обычного пользователя
+                    self._save_credentials(self.credentials)
             
             # Создаем сервисный объект
             self.service = build('sheets', 'v4', credentials=self.credentials)
