@@ -641,7 +641,7 @@ class GoogleSheetsAPI:
         """
         try:
             # Проверяем, существует ли уже лист с таким названием
-            existing_sheets = self.read_values("A1:A")  # Используем публичный метод
+            existing_sheets = self.read_values("Projects!A1:A")  # Исправляем название метода и добавляем имя листа
             if existing_sheets and project_name in [row[0] for row in existing_sheets if row]:
                 logger.warning(f"Лист с названием '{project_name}' уже существует")
                 return None
