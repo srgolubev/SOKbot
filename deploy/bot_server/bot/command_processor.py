@@ -265,8 +265,24 @@ class CommandProcessor:
                 logger.info(f"Создание листа проекта с данными: {json.dumps(project_data, ensure_ascii=False)}")
                 
                 # Создаем лист проекта
-                sheet_id = self.sheets_api.create_project_sheet(project_data)
-                logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
+                try:
+                    # Проверяем, какой метод доступен в sheets_api
+                    if hasattr(self.sheets_api, 'create_project_sheet'):
+                        # Вызываем метод create_project_sheet, если он существует
+                        logger.info("DEBUG: Вызов метода create_project_sheet")
+                        sheet_id = self.sheets_api.create_project_sheet(project_data)
+                    elif hasattr(self.sheets_api, 'create_project_sheet_with_retry'):
+                        # Вызываем метод create_project_sheet_with_retry, если он существует
+                        logger.info("DEBUG: Вызов метода create_project_sheet_with_retry")
+                        sheet_id = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
+                    else:
+                        # Если ни один из методов не найден, вызываем ошибку
+                        raise AttributeError(f"GoogleSheetsAPI не имеет методов для создания листа. Доступные методы: {dir(self.sheets_api)}")
+                    
+                    logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
+                except Exception as e:
+                    logger.error(f"DEBUG: Ошибка при создании листа проекта: {str(e)}")
+                    raise
                 
                 success_message = f"""
                 ✅ Лист проекта успешно создан!
