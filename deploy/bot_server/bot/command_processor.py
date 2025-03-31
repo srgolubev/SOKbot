@@ -149,6 +149,10 @@ class CommandProcessor:
             messages = [system_message] + self.chat_histories[chat_id]
             logger.info(f"DEBUG: Отправка {len(messages)} сообщений в OpenAI API")
             
+            # Логируем историю сообщений для отладки
+            for i, msg in enumerate(self.chat_histories[chat_id]):
+                logger.info(f"DEBUG: История [{i}] - {msg['role']}: {msg['content'][:30]}...")
+            
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages
@@ -308,9 +312,14 @@ class CommandProcessor:
         try:
             logger.info("Начало обработки сообщения от Telegram")
             
+            # Логируем структуру объекта message для отладки
+            logger.info(f"DEBUG: Структура объекта message: {dir(message)}")
+            logger.info(f"DEBUG: Структура объекта message.chat: {message.chat}")
+            
             # Получаем текст сообщения и информацию о чате
             chat_id = message.chat["id"]
             text = message.text or ""
+            logger.info(f"DEBUG: Получен chat_id: {chat_id}, текст: '{text}'")
             
             if not chat_id or not text:
                 logger.warning("Получено некорректное сообщение")
