@@ -180,7 +180,7 @@ class CommandProcessor:
         """
         try:
             # Извлекаем информацию о проекте из команды
-            project_info = await self._extract_project_info(command)
+            project_info = self._extract_project_info(command)
             if not project_info:
                 await self.bot.send_message(
                     chat_id=chat_id,
