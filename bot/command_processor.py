@@ -60,7 +60,7 @@ class CommandProcessor:
             # Инициализируем словарь для хранения истории сообщений, если он еще не инициализирован
             if not hasattr(self, 'chat_histories'):
                 self.chat_histories = {}
-                self.max_history_length = 10
+                self.max_history_length = 5  # Уменьшено до 5 для оптимизации использования памяти
                 logger.info("Инициализировано хранилище истории сообщений")
             
             logger.info("Асинхронная инициализация CommandProcessor успешно завершена")
