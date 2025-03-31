@@ -119,7 +119,7 @@ class GPTCommandParser:
             # Отправляем запрос к GPT
             try:
                 response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
+                    model="gpt-4o",
                     messages=[
                         {"role": "system", "content": self.system_prompt},
                         {"role": "user", "content": message}

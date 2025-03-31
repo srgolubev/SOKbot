@@ -154,7 +154,7 @@ class CommandProcessor:
                 logger.info(f"DEBUG: История [{i}] - {msg['role']}: {msg['content'][:30]}...")
             
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=messages
             )
             
@@ -201,7 +201,7 @@ class CommandProcessor:
             # Отправляем запрос в ChatGPT
             logger.info("Отправка запроса в ChatGPT API")
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "Ты - помощник, который извлекает структурированную информацию из текста."},
                     {"role": "user", "content": prompt}
