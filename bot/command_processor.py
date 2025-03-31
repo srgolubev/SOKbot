@@ -75,53 +75,100 @@ class CommandProcessor:
         except Exception as e:
             logger.error(f"Ошибка подключения к Telegram: {str(e)}")
             raise
-
     async def _extract_project_info(self, message: str) -> Optional[Dict[str, Any]]:
-        """
-        Извлекает информацию о проекте из сообщения пользователя используя GPT
+    """
+    Извлекает информацию о проекте из сообщения пользователя используя GPT
+    
+    Args:
+        message: Текст сообщения от пользователя
         
-        Args:
-            message: Текст сообщения от пользователя
-            
-        Returns:
-            Optional[Dict[str, Any]]: Словарь с информацией о проекте или None в случае ошибки
+    Returns:
+        Optional[Dict[str, Any]]: Словарь с информацией о проекте или None в случае ошибки
+    """
+    try:
+        prompt = f"""
+        Извлеки из текста название проекта и список разделов для создания таблицы.
+        Разделы должны быть релевантны контексту проекта.
+        
+        Текст: {message}
+        
+        Ответь строго в формате JSON:
+        {{
+            "project_name": "Название проекта",
+            "sections": ["Раздел 1", "Раздел 2", ...]
+        }}
         """
-        try:
-            prompt = f"""
-            Извлеки из текста название проекта и список разделов для создания таблицы.
-            Разделы должны быть релевантны контексту проекта.
-            
-            Текст: {message}
-            
-            Ответь строго в формате JSON:
-            {{
-                "project_name": "Название проекта",
-                "sections": ["Раздел 1", "Раздел 2", ...]
-            }}
-            """
-            
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo-1106",
-                response_format={ "type": "json_object" },
-                messages=[
-                    {"role": "system", "content": "Ты помощник для извлечения информации о проекте из текста"},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            # Извлекаем JSON из ответа
-            result = json.loads(response.choices[0].message.content)
-            
-            # Проверяем обязательные поля
-            if not result.get('project_name') or not result.get('sections'):
-                logger.error("GPT вернул неполный ответ")
-                return None
-                
-            return result
-            
-        except Exception as e:
-            logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
+        
+        # Синхронный вызов OpenAI API (без await)
+        response = self.openai_client.chat.completions.create(
+            model="gpt-3.5-turbo-1106",
+            response_format={ "type": "json_object" },
+            messages=[
+                {"role": "system", "content": "Ты помощник для извлечения информации о проекте из текста"},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Извлекаем JSON из ответа
+        result = json.loads(response.choices[0].message.content)
+        
+        # Проверяем обязательные поля
+        if not result.get('project_name') or not result.get('sections'):
+            logger.error("GPT вернул неполный ответ")
             return None
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
+        return None
+
+    # async def _extract_project_info(self, message: str) -> Optional[Dict[str, Any]]:
+    #     """
+    #     Извлекает информацию о проекте из сообщения пользователя используя GPT
+        
+    #     Args:
+    #         message: Текст сообщения от пользователя
+            
+    #     Returns:
+    #         Optional[Dict[str, Any]]: Словарь с информацией о проекте или None в случае ошибки
+    #     """
+    #     try:
+    #         prompt = f"""
+    #         Извлеки из текста название проекта и список разделов для создания таблицы.
+    #         Разделы должны быть релевантны контексту проекта.
+            
+    #         Текст: {message}
+            
+    #         Ответь строго в формате JSON:
+    #         {{
+    #             "project_name": "Название проекта",
+    #             "sections": ["Раздел 1", "Раздел 2", ...]
+    #         }}
+    #         """
+            
+    #         response = await self.openai_client.chat.completions.create(
+    #             model="gpt-3.5-turbo-1106",
+    #             response_format={ "type": "json_object" },
+    #             messages=[
+    #                 {"role": "system", "content": "Ты помощник для извлечения информации о проекте из текста"},
+    #                 {"role": "user", "content": prompt}
+    #             ]
+    #         )
+            
+    #         # Извлекаем JSON из ответа
+    #         result = json.loads(response.choices[0].message.content)
+            
+    #         # Проверяем обязательные поля
+    #         if not result.get('project_name') or not result.get('sections'):
+    #             logger.error("GPT вернул неполный ответ")
+    #             return None
+                
+    #         return result
+            
+    #     except Exception as e:
+    #         logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
+    #         return None
 
     async def process_command(self, chat_id: int, command: str) -> None:
         """
