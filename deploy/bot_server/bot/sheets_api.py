@@ -464,6 +464,26 @@ class GoogleSheetsAPI:
         
         return f"{base_name}-{counter}"
 
+    def create_project_sheet_with_retry(self, project_name: str, sections: List[str]) -> int:
+        """
+        Создает новый лист проекта с заданными разделами на основе шаблонов.
+        
+        Args:
+            project_name: Название проекта
+            sections: Список разделов проекта
+            
+        Returns:
+            int: ID созданного листа
+        """
+        # Создаем словарь с данными проекта
+        project_data = {
+            "project_name": project_name,
+            "sections": sections
+        }
+        
+        # Вызываем основной метод создания листа
+        return self.create_project_sheet(project_data)
+    
     def create_project_sheet(self, project_data: dict) -> int:
         """
         Создает новый лист проекта на основе шаблонов
