@@ -85,6 +85,7 @@ class CommandProcessor:
         Returns:
             str: Тип запроса ("create_table", "help" или "chat")
         """
+        logger.info(f"DEBUG: Определение типа запроса для сообщения: '{message}'")
         message_lower = message.lower()
         
         # Ключевые слова для создания таблицы
@@ -99,12 +100,19 @@ class CommandProcessor:
             "как работает", "команды", "инструкция"
         ]
         
-        if any(keyword in message_lower for keyword in create_table_keywords):
-            return "create_table"
-        elif any(keyword in message_lower for keyword in help_keywords):
-            return "help"
-        else:
-            return "chat"  # По умолчанию - режим чата
+        # Проверяем наличие ключевых слов
+        for keyword in create_table_keywords:
+            if keyword in message_lower:
+                logger.info(f"DEBUG: Найдено ключевое слово для создания таблицы: '{keyword}'")
+                return "create_table"
+                
+        for keyword in help_keywords:
+            if keyword in message_lower:
+                logger.info(f"DEBUG: Найдено ключевое слово для справки: '{keyword}'")
+                return "help"
+        
+        logger.info("DEBUG: Ключевые слова не найдены, используем режим чата")
+        return "chat"  # По умолчанию - режим чата
     
     def _extract_project_info(self, message: str) -> Optional[Dict[str, Any]]:
         """
@@ -236,15 +244,19 @@ class CommandProcessor:
             chat_id: ID чата
             command: Текст команды
         """
+        logger.info(f"DEBUG: Начало обработки команды: '{command}'")
         try:
             # Определяем тип запроса
             intent = self._determine_intent(command)
-            logger.info(f"Определен тип запроса: {intent}")
+            logger.info(f"DEBUG: Определен тип запроса: {intent}")
             
+            # Проверяем тип запроса и выбираем соответствующую обработку
             if intent == "create_table":
+                logger.info("DEBUG: Обработка запроса на создание таблицы")
                 # Извлекаем информацию о проекте из команды
                 project_info = self._extract_project_info(command)
                 if not project_info:
+                    logger.info("DEBUG: Не удалось извлечь информацию о проекте")
                     await self.bot.send_message(
                         chat_id=chat_id,
                         text="Не удалось извлечь информацию о проекте из команды. Пожалуйста, попробуйте переформулировать."
@@ -279,6 +291,7 @@ class CommandProcessor:
                     )
             
             elif intent == "help":
+                logger.info("DEBUG: Обработка запроса на получение справки")
                 # Отправляем справку
                 help_text = """Я могу помочь вам с созданием таблиц Google Sheets для ваших проектов, а также отвечать на ваши вопросы.
 
@@ -293,8 +306,11 @@ class CommandProcessor:
                 )
             
             else:  # intent == "chat"
+                logger.info("DEBUG: Обработка запроса в режиме чата")
                 # Обрабатываем как обычный запрос к чат-боту
+                logger.info(f"DEBUG: Отправка запроса в OpenAI API: '{command}'")
                 ai_response = self._chat_with_ai(command)
+                logger.info(f"DEBUG: Получен ответ от OpenAI API: '{ai_response[:50]}...'")
                 await self.bot.send_message(
                     chat_id=chat_id,
                     text=ai_response
