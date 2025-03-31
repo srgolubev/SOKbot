@@ -122,6 +122,33 @@ class CommandProcessor:
         except Exception as e:
             logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
             return None
+            
+    def _chat_with_ai(self, message: str) -> str:
+        """
+        Обрабатывает обычный запрос к AI через OpenAI API
+        
+        Args:
+            message: Текст сообщения от пользователя
+            
+        Returns:
+            str: Ответ от AI
+        """
+        try:
+            # Синхронный вызов OpenAI API
+            response = self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты помощник в телеграм боте, который может отвечать на вопросы и помогать с различными задачами. Отвечай кратко и по существу."},
+                    {"role": "user", "content": message}
+                ]
+            )
+            
+            # Извлекаем текст ответа
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обращении к AI: {str(e)}")
+            return "К сожалению, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
 
     # async def _extract_project_info(self, message: str) -> Optional[Dict[str, Any]]:
     #     """
@@ -179,39 +206,56 @@ class CommandProcessor:
             command: Текст команды
         """
         try:
-            # Извлекаем информацию о проекте из команды
-            project_info = self._extract_project_info(command)
-            if not project_info:
-                await self.bot.send_message(
-                    chat_id=chat_id,
-                    text="Не удалось извлечь информацию о проекте из команды. Пожалуйста, попробуйте переформулировать."
-                )
-                return
+            # Проверяем, содержит ли команда ключевые слова для создания таблицы
+            create_table_keywords = [
+                "создай таблицу", "сделай таблицу", "новая таблица", 
+                "создать таблицу", "сделать таблицу", "создай лист", "сделай лист"
+            ]
+            
+            is_create_table_command = any(keyword.lower() in command.lower() for keyword in create_table_keywords)
+            
+            if is_create_table_command:
+                # Извлекаем информацию о проекте из команды
+                project_info = self._extract_project_info(command)
+                if not project_info:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text="Не удалось извлечь информацию о проекте из команды. Пожалуйста, попробуйте переформулировать."
+                    )
+                    return
 
-            project_name = project_info['project_name']
-            sections = project_info['sections']
+                project_name = project_info['project_name']
+                sections = project_info['sections']
 
-            # Создаем лист проекта
-            sheet_url = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
-            if sheet_url:
-                # Получаем фактическое имя листа из URL
-                sheet_name = sheet_url.split('=')[-1]  # Получаем gid
-                sheet_info = self.sheets_api.get_sheet_info(sheet_name)
-                actual_name = sheet_info['title'] if sheet_info else project_name
-                
-                message = f"Создан новый лист проекта"
-                if actual_name != project_name:
-                    message += f" (имя изменено на '{actual_name}', так как '{project_name}' уже существует)"
-                message += f".\nСсылка: {sheet_url}"
-                
-                await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=message
-                )
+                # Создаем лист проекта
+                sheet_url = self.sheets_api.create_project_sheet_with_retry(project_name, sections)
+                if sheet_url:
+                    # Получаем фактическое имя листа из URL
+                    sheet_name = sheet_url.split('=')[-1]  # Получаем gid
+                    sheet_info = self.sheets_api.get_sheet_info(sheet_name)
+                    actual_name = sheet_info['title'] if sheet_info else project_name
+                    
+                    message = f"Создан новый лист проекта"
+                    if actual_name != project_name:
+                        message += f" (имя изменено на '{actual_name}', так как '{project_name}' уже существует)"
+                    message += f".\
+Ссылка: {sheet_url}"
+                    
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=message
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"Не удалось создать лист проекта. Пожалуйста, попробуйте позже."
+                    )
             else:
+                # Обрабатываем обычный запрос через OpenAI API
+                ai_response = self._chat_with_ai(command)
                 await self.bot.send_message(
                     chat_id=chat_id,
-                    text=f"Не удалось создать лист проекта. Пожалуйста, попробуйте позже."
+                    text=ai_response
                 )
 
         except Exception as e:
