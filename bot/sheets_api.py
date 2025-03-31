@@ -60,6 +60,19 @@ class GoogleSheetsAPI:
             self.service = build('sheets', 'v4', credentials=self.credentials)
             logger.info("Сервисный объект успешно создан")
             
+            # Загружаем ID основной таблицы из файла client_secrets.json
+            client_secrets_path = os.path.join('credentials', 'client_secrets.json')
+            if os.path.exists(client_secrets_path):
+                with open(client_secrets_path, 'r') as f:
+                    config = json.load(f)
+                    if 'installed' in config and 'main_sheet' in config['installed']:
+                        self.spreadsheet_id = config['installed']['main_sheet']
+                        logger.info(f"ID основной таблицы загружен: {self.spreadsheet_id}")
+                    else:
+                        logger.error("В файле client_secrets.json не найден ID основной таблицы")
+            else:
+                logger.error(f"Файл {client_secrets_path} не найден")
+            
         except Exception as e:
             logger.error(f"Ошибка при аутентификации: {str(e)}")
             raise
