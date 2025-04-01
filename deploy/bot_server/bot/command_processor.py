@@ -324,12 +324,17 @@ class CommandProcessor:
                 Это может занять некоторое время. Я сообщу, когда таблица будет готова.
                 """
                 
-                # Запускаем асинхронную задачу создания таблицы
+                # Импортируем asyncio до его использования
                 import asyncio
+                
+                # Отправляем сообщение о начале создания немедленно
+                asyncio.create_task(self.send_telegram_message(chat_id, processing_message))
+                
+                # Запускаем асинхронную задачу создания таблицы
                 asyncio.create_task(self._create_table_async(chat_id, project_data))
                 
-                # Возвращаем сообщение о начале процесса
-                return processing_message
+                # Возвращаем пустое сообщение, т.к. мы уже отправили уведомление
+                return ""
                 
             elif intent == "help":
                 logger.info("DEBUG: Обработка запроса на получение справки")
