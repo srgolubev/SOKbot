@@ -202,14 +202,19 @@ class CommandProcessor:
             logger.info("Отправка запроса в ChatGPT API")
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
+                response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": "Ты - помощник, который извлекает структурированную информацию из текста."},
                     {"role": "user", "content": prompt}
                 ]
             )
             
+            # Добавляем логирование сырого ответа
+            raw_content = response.choices[0].message.content
+            logger.info(f"Сырой ответ от ChatGPT: {raw_content}")
+            
             # Парсим ответ
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(raw_content)
             logger.info(f"Получен и разобран ответ от ChatGPT: {json.dumps(result, ensure_ascii=False)}")
             
             # Проверяем корректность данных
