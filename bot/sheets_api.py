@@ -578,7 +578,7 @@ class GoogleSheetsAPI:
                 all_sections = sections + ['Прочее']  # Добавляем секцию "Прочее" с заглавной буквы
                 logger.info(f"Processing sections: {all_sections}")
                 
-                # Обрабатываем только первый раздел для отладки
+                # Обрабатываем все разделы
                 for index, section in enumerate(all_sections):
                     logger.info(f"Processing section {index+1}/{len(all_sections)}: {section}")
                     # Добавляем ссылку на ячейку с суммой для текущей секции
@@ -607,10 +607,8 @@ class GoogleSheetsAPI:
                         temp_sheet_title = temp_response['title']
                         logger.info(f"Temporary sheet created: ID={temp_sheet_id}, Title={temp_sheet_title}")
                         
-                        # После обработки первого раздела выходим из цикла для отладки
-                        if index == 0:
-                            logger.info("Processed first section for debugging, breaking loop")
-                            break
+                        # Продолжаем обработку всех разделов
+                        logger.info(f"Successfully processed section {index+1}/{len(all_sections)}: {section}")
                     except Exception as e:
                         logger.error(f"Error processing section {section}: {str(e)}")
                         raise
@@ -642,8 +640,8 @@ class GoogleSheetsAPI:
                             requests = []
                             logger.info("Starting to process cells for text replacements")
                             
-                            # Проходим только первые 5 строк для отладки
-                            for row_idx, row in enumerate(grid_data[:5]):
+                            # Проходим все строки
+                            for row_idx, row in enumerate(grid_data):
                                 if 'values' in row:
                                     for col_idx, cell in enumerate(row['values']):
                                         # Проверяем, что это текстовая ячейка без формулы
