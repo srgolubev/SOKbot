@@ -474,6 +474,8 @@ class GoogleSheetsAPI:
         max_retries = 3
         retry_delay = 2  # секунды
         
+        logger.info(f"Starting create_project_sheet_with_retry for project: {project_name} with sections: {sections}")
+        
         for attempt in range(max_retries):
             try:
                 # Создаем словарь с данными проекта
@@ -481,15 +483,18 @@ class GoogleSheetsAPI:
                     "project_name": project_name,
                     "sections": sections
                 }
+                logger.info(f"Project data prepared: {json.dumps(project_data, ensure_ascii=False)}")
                 
                 # Загружаем конфигурацию
                 client_secrets_path = os.path.join('credentials', 'client_secrets.json')
+                logger.info(f"Loading configuration from: {client_secrets_path}")
                 if not os.path.exists(client_secrets_path):
                     logger.error(f"Файл {client_secrets_path} не найден")
                     return None
                     
                 with open(client_secrets_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                logger.info("Configuration loaded successfully")
                 
                 if 'installed' not in config:
                     logger.error("В файле client_secrets.json нет раздела 'installed'")
@@ -514,25 +519,35 @@ class GoogleSheetsAPI:
                 
                 # Получаем уникальное имя листа
                 sheet_name = self._get_unique_sheet_name(project_data['project_name'])
+                logger.info(f"Generated unique sheet name: {sheet_name}")
                 
                 # Копируем шаблон верхней части в основную таблицу
+                logger.info(f"Getting template metadata from spreadsheet: {template_top_id}")
                 template_metadata = self.service.spreadsheets().get(
                     spreadsheetId=template_top_id
                 ).execute()
                 source_sheet_id = template_metadata['sheets'][0]['properties']['sheetId']
+                logger.info(f"Source sheet ID: {source_sheet_id}")
                 
                 # Копируем лист с форматированием
                 request_body = {
                     'destinationSpreadsheetId': main_sheet_id
                 }
+                logger.info(f"Copying template to main spreadsheet: {main_sheet_id}")
                 
-                response = self.service.spreadsheets().sheets().copyTo(
-                    spreadsheetId=template_top_id,
-                    sheetId=source_sheet_id,
-                    body=request_body
-                ).execute()
-                
-                new_sheet_id = response['sheetId']
+                try:
+                    response = self.service.spreadsheets().sheets().copyTo(
+                        spreadsheetId=template_top_id,
+                        sheetId=source_sheet_id,
+                        body=request_body
+                    ).execute()
+                    logger.info(f"Template copied successfully: {response}")
+                    
+                    new_sheet_id = response['sheetId']
+                    logger.info(f"New sheet ID: {new_sheet_id}")
+                except Exception as e:
+                    logger.error(f"Error copying template: {str(e)}")
+                    raise
                 
                 # Переименовываем лист
                 rename_request = {
@@ -561,26 +576,44 @@ class GoogleSheetsAPI:
                 
                 # Для каждой секции копируем шаблон и заменяем placeholder
                 all_sections = sections + ['Прочее']  # Добавляем секцию "Прочее" с заглавной буквы
+                logger.info(f"Processing sections: {all_sections}")
                 
-                for section in all_sections:
+                # Обрабатываем только первый раздел для отладки
+                for index, section in enumerate(all_sections):
+                    logger.info(f"Processing section {index+1}/{len(all_sections)}: {section}")
                     # Добавляем ссылку на ячейку с суммой для текущей секции
                     formula_parts.append(f'E{current_row}')
+                    logger.info(f"Added formula part: E{current_row}")
                     
-                    # Получаем данные из шаблона секции
-                    section_metadata = self.service.spreadsheets().get(
-                        spreadsheetId=template_section_id
-                    ).execute()
-                    section_sheet_id = section_metadata['sheets'][0]['properties']['sheetId']
-                    
-                    # Копируем секцию во временный лист
-                    temp_response = self.service.spreadsheets().sheets().copyTo(
-                        spreadsheetId=template_section_id,
-                        sheetId=section_sheet_id,
-                        body={'destinationSpreadsheetId': main_sheet_id}
-                    ).execute()
-                    
-                    temp_sheet_id = temp_response['sheetId']
-                    temp_sheet_title = temp_response['title']
+                    try:
+                        # Получаем данные из шаблона секции
+                        logger.info(f"Getting section template metadata from: {template_section_id}")
+                        section_metadata = self.service.spreadsheets().get(
+                            spreadsheetId=template_section_id
+                        ).execute()
+                        section_sheet_id = section_metadata['sheets'][0]['properties']['sheetId']
+                        logger.info(f"Section template sheet ID: {section_sheet_id}")
+                        
+                        # Копируем секцию во временный лист
+                        logger.info(f"Copying section template to main spreadsheet")
+                        temp_response = self.service.spreadsheets().sheets().copyTo(
+                            spreadsheetId=template_section_id,
+                            sheetId=section_sheet_id,
+                            body={'destinationSpreadsheetId': main_sheet_id}
+                        ).execute()
+                        logger.info(f"Section template copied successfully: {temp_response}")
+                        
+                        temp_sheet_id = temp_response['sheetId']
+                        temp_sheet_title = temp_response['title']
+                        logger.info(f"Temporary sheet created: ID={temp_sheet_id}, Title={temp_sheet_title}")
+                        
+                        # После обработки первого раздела выходим из цикла для отладки
+                        if index == 0:
+                            logger.info("Processed first section for debugging, breaking loop")
+                            break
+                    except Exception as e:
+                        logger.error(f"Error processing section {section}: {str(e)}")
+                        raise
                     
                     # Читаем данные из временного листа
                     section_values = self.read_values(main_sheet_id, f'{temp_sheet_title}!A1:J')

@@ -475,14 +475,21 @@ class GoogleSheetsAPI:
         Returns:
             int: ID созданного листа
         """
-        # Создаем словарь с данными проекта
-        project_data = {
-            "project_name": project_name,
-            "sections": sections
-        }
+        logger.info(f"Starting create_project_sheet_with_retry for project: {project_name} with sections: {sections}")
         
-        # Вызываем основной метод создания листа
-        return self.create_project_sheet(project_data)
+        try:
+            # Создаем словарь с данными проекта
+            project_data = {
+                "project_name": project_name,
+                "sections": sections
+            }
+            logger.info(f"Project data prepared: {json.dumps(project_data, ensure_ascii=False)}")
+            
+            # Вызываем основной метод создания листа
+            return self.create_project_sheet(project_data)
+        except Exception as e:
+            logger.error(f"Error in create_project_sheet_with_retry: {str(e)}")
+            raise
     
     def create_project_sheet(self, project_data: dict) -> int:
         """
