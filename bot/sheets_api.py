@@ -616,47 +616,75 @@ class GoogleSheetsAPI:
                         raise
                     
                     # Читаем данные из временного листа
+                    logger.info(f"Reading values from temporary sheet: {temp_sheet_title}!A1:J")
                     section_values = self.read_values(main_sheet_id, f'{temp_sheet_title}!A1:J')
+                    logger.info(f"Read {len(section_values) if section_values else 0} rows from temporary sheet")
                     
                     if section_values:
+                        logger.info("Getting detailed cell information including formulas")
                         # Получаем информацию о ячейках, включая формулы
-                        sheet_data = self.service.spreadsheets().get(
-                            spreadsheetId=main_sheet_id,
-                            ranges=[f'{temp_sheet_title}!A1:J'],
-                            includeGridData=True
-                        ).execute()
+                        try:
+                            sheet_data = self.service.spreadsheets().get(
+                                spreadsheetId=main_sheet_id,
+                                ranges=[f'{temp_sheet_title}!A1:J'],
+                                includeGridData=True
+                            ).execute()
+                            logger.info("Successfully retrieved sheet data with grid data")
+                        except Exception as e:
+                            logger.error(f"Error getting sheet data: {str(e)}")
+                            raise
                         
-                        grid_data = sheet_data['sheets'][0]['data'][0]['rowData']
-                        
-                        # Собираем обновления для текстовых ячеек
-                        requests = []
-                        for row_idx, row in enumerate(grid_data):
-                            if 'values' in row:
-                                for col_idx, cell in enumerate(row['values']):
-                                    # Проверяем, что это текстовая ячейка без формулы
-                                    if ('userEnteredValue' in cell and 
-                                        'stringValue' in cell['userEnteredValue'] and 
-                                        '{sectionName}' in cell['userEnteredValue']['stringValue']):
-                                        
-                                        requests.append({
-                                            'updateCells': {
-                                                'range': {
-                                                    'sheetId': new_sheet_id,
-                                                    'startRowIndex': current_row - 1 + row_idx,
-                                                    'endRowIndex': current_row + row_idx,
-                                                    'startColumnIndex': col_idx,
-                                                    'endColumnIndex': col_idx + 1
-                                                },
-                                                'rows': [{
-                                                    'values': [{
-                                                        'userEnteredValue': {
-                                                            'stringValue': cell['userEnteredValue']['stringValue'].replace('{sectionName}', section.title())
+                        try:
+                            grid_data = sheet_data['sheets'][0]['data'][0]['rowData']
+                            logger.info(f"Retrieved grid data with {len(grid_data)} rows")
+                            
+                            # Собираем обновления для текстовых ячеек
+                            requests = []
+                            logger.info("Starting to process cells for text replacements")
+                            
+                            # Проходим только первые 5 строк для отладки
+                            for row_idx, row in enumerate(grid_data[:5]):
+                                if 'values' in row:
+                                    for col_idx, cell in enumerate(row['values']):
+                                        # Проверяем, что это текстовая ячейка без формулы
+                                        if ('userEnteredValue' in cell and 
+                                            'stringValue' in cell['userEnteredValue']):
+                                            cell_value = cell['userEnteredValue']['stringValue']
+                                            if '{sectionName}' in cell_value:
+                                                logger.info(f"Found cell with placeholder at row {row_idx+1}, col {col_idx+1}: {cell_value}")
+                                                
+                                                try:
+                                                    new_value = cell_value.replace('{sectionName}', section.title())
+                                                    logger.info(f"Replacing placeholder with '{section.title()}' at row {row_idx+1}, col {col_idx+1}")
+                                                    
+                                                    requests.append({
+                                                        'updateCells': {
+                                                            'range': {
+                                                                'sheetId': new_sheet_id,
+                                                                'startRowIndex': current_row - 1 + row_idx,
+                                                                'endRowIndex': current_row + row_idx,
+                                                                'startColumnIndex': col_idx,
+                                                                'endColumnIndex': col_idx + 1
+                                                            },
+                                                            'rows': [{
+                                                                'values': [{
+                                                                    'userEnteredValue': {
+                                                                        'stringValue': new_value
+                                                                    }
+                                                                }]
+                                                            }],
+                                                            'fields': 'userEnteredValue'
                                                         }
-                                                    }]
-                                                }],
-                                                'fields': 'userEnteredValue'
-                                            }
-                                        })
+                                                    })
+                                                    logger.info(f"Added update request for cell at row {current_row - 1 + row_idx}, col {col_idx}")
+                                                except Exception as e:
+                                                    logger.error(f"Error creating update request: {str(e)}")
+                                                    raise
+                            
+                            logger.info(f"Total update requests created: {len(requests)}")
+                        except Exception as e:
+                            logger.error(f"Error processing grid data: {str(e)}")
+                            raise
                         
                         # Копируем секцию целиком
                         copy_request = {
@@ -684,18 +712,30 @@ class GoogleSheetsAPI:
                         }
                         
                         # Применяем копирование
-                        self.service.spreadsheets().batchUpdate(
-                            spreadsheetId=main_sheet_id,
-                            body=copy_request
-                        ).execute()
+                        try:
+                            logger.info(f"Executing copy request for section {section}")
+                            copy_response = self.service.spreadsheets().batchUpdate(
+                                spreadsheetId=main_sheet_id,
+                                body=copy_request
+                            ).execute()
+                            logger.info(f"Copy request executed successfully: {copy_response}")
+                        except Exception as e:
+                            logger.error(f"Error executing copy request: {str(e)}")
+                            raise
                         
                         # Применяем обновления текстовых ячеек
                         if requests:
-                            update_request = {'requests': requests}
-                            self.service.spreadsheets().batchUpdate(
-                                spreadsheetId=main_sheet_id,
-                                body=update_request
-                            ).execute()
+                            try:
+                                logger.info(f"Executing update request with {len(requests)} requests")
+                                update_request = {'requests': requests}
+                                update_response = self.service.spreadsheets().batchUpdate(
+                                    spreadsheetId=main_sheet_id,
+                                    body=update_request
+                                ).execute()
+                                logger.info(f"Update request executed successfully: {update_response}")
+                            except Exception as e:
+                                logger.error(f"Error executing update request: {str(e)}")
+                                raise
                         
                         # Обновляем текущую строку
                         current_row += len(section_values)
@@ -709,39 +749,52 @@ class GoogleSheetsAPI:
                         }]
                     }
                     
-                    self.service.spreadsheets().batchUpdate(
-                        spreadsheetId=main_sheet_id,
-                        body=delete_request
-                    ).execute()
+                    try:
+                        logger.info(f"Deleting temporary sheet with ID: {temp_sheet_id}")
+                        delete_response = self.service.spreadsheets().batchUpdate(
+                            spreadsheetId=main_sheet_id,
+                            body=delete_request
+                        ).execute()
+                        logger.info(f"Temporary sheet deleted successfully: {delete_response}")
+                    except Exception as e:
+                        logger.error(f"Error deleting temporary sheet: {str(e)}")
+                        raise
                 
                 # Обновляем формулу суммы в ячейке E2
-                formula = '=' + '+'.join(formula_parts)
-                formula_request = {
-                    'requests': [{
-                        'updateCells': {
-                            'range': {
-                                'sheetId': new_sheet_id,
-                                'startRowIndex': 1,
-                                'endRowIndex': 2,
-                                'startColumnIndex': 4,
-                                'endColumnIndex': 5
-                            },
-                            'rows': [{
-                                'values': [{
-                                    'userEnteredValue': {
-                                        'formulaValue': formula
-                                    }
-                                }]
-                            }],
-                            'fields': 'userEnteredValue'
-                        }
-                    }]
-                }
-                
-                self.service.spreadsheets().batchUpdate(
-                    spreadsheetId=main_sheet_id,
-                    body=formula_request
-                ).execute()
+                try:
+                    formula = '=' + '+'.join(formula_parts)
+                    logger.info(f"Creating formula for sum: {formula}")
+                    formula_request = {
+                        'requests': [{
+                            'updateCells': {
+                                'range': {
+                                    'sheetId': new_sheet_id,
+                                    'startRowIndex': 1,
+                                    'endRowIndex': 2,
+                                    'startColumnIndex': 4,
+                                    'endColumnIndex': 5
+                                },
+                                'rows': [{
+                                    'values': [{
+                                        'userEnteredValue': {
+                                            'formulaValue': formula
+                                        }
+                                    }]
+                                }],
+                                'fields': 'userEnteredValue'
+                            }
+                        }]
+                    }
+                    
+                    logger.info("Executing formula update request")
+                    formula_response = self.service.spreadsheets().batchUpdate(
+                        spreadsheetId=main_sheet_id,
+                        body=formula_request
+                    ).execute()
+                    logger.info(f"Formula update executed successfully: {formula_response}")
+                except Exception as e:
+                    logger.error(f"Error updating formula: {str(e)}")
+                    raise
                 
                 logger.info(f"Создан лист проекта '{project_name}' с ID: {new_sheet_id}")
                 return f"https://docs.google.com/spreadsheets/d/{main_sheet_id}/edit#gid={new_sheet_id}"
