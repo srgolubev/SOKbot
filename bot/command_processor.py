@@ -171,7 +171,7 @@ class CommandProcessor:
             logger.error(f"Ошибка при обращении к AI: {str(e)}")
             return "К сожалению, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
     
-    def _extract_project_info(self, message: str) -> Tuple[Optional[str], Optional[List[str]]]:
+    def _extract_project_info(self, message: str) -> Dict[str, any]:
         """
         Извлекает информацию о проекте из сообщения с помощью ChatGPT.
         
@@ -179,7 +179,7 @@ class CommandProcessor:
             message: Текст сообщения от пользователя
             
         Returns:
-            Tuple[Optional[str], Optional[List[str]]]: Кортеж (название проекта, список разделов)
+            Dict[str, any]: Словарь с информацией о проекте или пустой словарь в случае ошибки
         """
         try:
             logger.info(f"Начало извлечения информации из сообщения: {message}")
@@ -198,37 +198,59 @@ class CommandProcessor:
             
             logger.debug(f"Подготовлен промпт для ChatGPT: {prompt}")
             
-            # Отправляем запрос в ChatGPT
-            logger.info("Отправка запроса в ChatGPT API")
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": "Ты - помощник, который извлекает структурированную информацию из текста."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
+            # Отправляем запрос в ChatGPT с обработкой ошибок
+            try:
+                logger.info("Отправка запроса в ChatGPT API")
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": "Ты - помощник, который извлекает структурированную информацию из текста."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    timeout=30  # Добавляем таймаут для запроса
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при запросе к ChatGPT API: {str(e)}")
+                return {}
+            
+            # Проверяем ответ на наличие данных
+            if not response or not response.choices or not response.choices[0].message:
+                logger.error("ChatGPT вернул пустой ответ")
+                return {}
             
             # Добавляем логирование сырого ответа
             raw_content = response.choices[0].message.content
             logger.info(f"Сырой ответ от ChatGPT: {raw_content}")
             
-            # Парсим ответ
-            result = json.loads(raw_content)
-            logger.info(f"Получен и разобран ответ от ChatGPT: {json.dumps(result, ensure_ascii=False)}")
+            # Парсим ответ с обработкой ошибок
+            try:
+                result = json.loads(raw_content)
+                logger.info(f"Получен и разобран ответ от ChatGPT: {json.dumps(result, ensure_ascii=False)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Ошибка при разборе JSON-ответа от ChatGPT: {str(e)}")
+                return {}
             
             # Проверяем корректность данных
+            if not isinstance(result, dict):
+                logger.error(f"ChatGPT вернул некорректный формат данных: {type(result)}")
+                return {}
+            
             if not result.get("project_name") or not result.get("sections"):
-                raise ValueError("ChatGPT вернул неполные данные")
+                logger.error(f"ChatGPT вернул неполные данные: {result}")
+                return {}
+                
+            if not isinstance(result.get("sections"), list):
+                logger.error(f"ChatGPT вернул некорректный формат для разделов: {result.get('sections')}")
+                return {}
             
-            return result["project_name"], result["sections"]
+            # Все проверки пройдены, возвращаем результат
+            logger.info(f"Извлечена информация: project_name='{result['project_name']}', sections={result['sections']}")
+            return result
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Ошибка при разборе JSON-ответа от ChatGPT: {str(e)}")
-            return None, None
         except Exception as e:
             logger.error(f"Ошибка при извлечении информации из сообщения: {str(e)}")
-            return None, None
+            return {}
 
     def process_command(self, message: str, chat_id: int) -> str:
         """
@@ -252,37 +274,31 @@ class CommandProcessor:
             if intent == "create_table":
                 logger.info("DEBUG: Обработка запроса на создание таблицы")
                 # Извлекаем информацию о проекте
-                project_name, sections = self._extract_project_info(message)
+                project_data = self._extract_project_info(message)
                 
-                if not project_name or not sections:
+                if not project_data or not project_data.get("project_name") or not project_data.get("sections"):
                     error_msg = "Не удалось извлечь информацию о проекте из сообщения. Пожалуйста, сформулируйте иначе."
                     logger.error(error_msg)
                     return error_msg
                 
-                logger.info(f"Извлечена информация: project_name='{project_name}', sections={sections}")
-                
-                # Формируем данные проекта
-                project_data = {
-                    "project_name": project_name,
-                    "sections": sections
-                }
-                
                 logger.info(f"Создание листа проекта с данными: {json.dumps(project_data, ensure_ascii=False)}")
                 
-                # Создаем лист проекта
-                sheet_id = self.sheets_api.create_project_sheet(project_data)
-                logger.info(f"Лист проекта успешно создан с ID: {sheet_id}")
+                # Отправляем сообщение о начале создания таблицы
+                processing_message = f"""
+                🔄 Начинаю создание таблицы...
                 
-                success_message = f"""
-                ✅ Лист проекта успешно создан!
+                📋 Название проекта: {project_data['project_name']}
+                📑 Разделы: {', '.join(project_data['sections'])}
                 
-                📋 Название проекта: {project_name}
-                📑 Разделы: {', '.join(sections)}
-                🔗 ID листа: {sheet_id}
+                Это может занять некоторое время. Я сообщу, когда таблица будет готова.
                 """
                 
-                logger.info("Команда успешно обработана")
-                return success_message
+                # Запускаем асинхронную задачу создания таблицы
+                import asyncio
+                asyncio.create_task(self._create_table_async(chat_id, project_data))
+                
+                # Возвращаем сообщение о начале процесса
+                return processing_message
                 
             elif intent == "help":
                 logger.info("DEBUG: Обработка запроса на получение справки")
@@ -363,6 +379,39 @@ class CommandProcessor:
                 await self.send_telegram_message(message.chat["id"], f"❌ {error_msg}")
             except Exception as send_error:
                 logger.error(f"Не удалось отправить сообщение об ошибке: {str(send_error)}")
+    
+    async def _create_table_async(self, chat_id: int, project_data: dict) -> None:
+        """
+        Асинхронно создает таблицу и отправляет уведомление пользователю.
+        
+        Args:
+            chat_id: ID чата пользователя
+            project_data: Данные проекта для создания таблицы
+        """
+        try:
+            logger.info(f"Начало асинхронного создания таблицы: {json.dumps(project_data, ensure_ascii=False)}")
+            
+            # Создаем лист проекта
+            sheet_url = self.sheets_api.create_project_sheet_with_retry(project_data['project_name'], project_data['sections'])
+            
+            if sheet_url:
+                logger.info(f"Таблица успешно создана: {sheet_url}")
+                
+                success_message = f"""
+                ✅ Таблица успешно создана!
+                
+                📋 Название проекта: {project_data['project_name']}
+                📑 Разделы: {', '.join(project_data['sections'])}
+                🔗 Ссылка: {sheet_url}
+                """
+                
+                await self.send_telegram_message(chat_id, success_message)
+            else:
+                logger.error("Не удалось создать таблицу")
+                await self.send_telegram_message(chat_id, "❌ Не удалось создать таблицу. Пожалуйста, попробуйте позже.")
+        except Exception as e:
+            logger.error(f"Ошибка при асинхронном создании таблицы: {str(e)}")
+            await self.send_telegram_message(chat_id, f"❌ Произошла ошибка при создании таблицы: {str(e)[:100]}... Пожалуйста, попробуйте позже.")
     
     async def send_telegram_message(self, chat_id: int, text: str) -> None:
         """
