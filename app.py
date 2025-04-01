@@ -51,7 +51,16 @@ class TelegramMessage(BaseModel):
 # Модель данных для входящего webhook-запроса от Telegram
 class TelegramUpdate(BaseModel):
     update_id: int
-    message: TelegramMessage
+    message: Optional[TelegramMessage] = None
+    my_chat_member: Optional[dict] = None
+    callback_query: Optional[dict] = None
+    edited_message: Optional[dict] = None
+    channel_post: Optional[dict] = None
+    edited_channel_post: Optional[dict] = None
+    inline_query: Optional[dict] = None
+    chosen_inline_result: Optional[dict] = None
+    poll: Optional[dict] = None
+    poll_answer: Optional[dict] = None
 
     class Config:
         allow_extra = True  # Разрешаем дополнительные поля
@@ -127,9 +136,19 @@ async def telegram_webhook_handler(request: Request, verified: bool = Depends(ve
             logger.error(f"Тело запроса не является словарем: {type(body)}")
             raise HTTPException(status_code=400, detail="Request body must be a JSON object")
             
-        if 'update_id' not in body or 'message' not in body:
-            logger.error(f"Отсутствуют обязательные поля в запросе: {body.keys()}")
-            raise HTTPException(status_code=400, detail="Missing required fields")
+        if 'update_id' not in body:
+            logger.error(f"Отсутствует обязательное поле update_id в запросе: {body.keys()}")
+            raise HTTPException(status_code=400, detail="Missing required field: update_id")
+            
+        # Проверяем наличие хотя бы одного известного типа обновления
+        known_update_types = ['message', 'edited_message', 'channel_post', 'edited_channel_post', 
+                             'inline_query', 'chosen_inline_result', 'callback_query', 
+                             'poll', 'poll_answer', 'my_chat_member', 'chat_member']
+        
+        has_known_type = any(update_type in body for update_type in known_update_types)
+        if not has_known_type:
+            logger.error(f"Неизвестный тип обновления: {body.keys()}")
+            raise HTTPException(status_code=400, detail="Unknown update type")
             
         try:
             update = TelegramUpdate(**body)
@@ -143,8 +162,21 @@ async def telegram_webhook_handler(request: Request, verified: bool = Depends(ve
             logger.error(error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
         
-        # Обработка сообщения
-        await command_processor.process_message(update.message)
+        # Обработка различных типов обновлений
+        if update.message:
+            # Обработка обычного сообщения
+            await command_processor.process_message(update.message)
+        elif update.my_chat_member:
+            # Обработка уведомления о членстве в группе
+            logger.info(f"Получено уведомление о членстве в группе: {update.my_chat_member}")
+            # Здесь можно добавить логику обработки членства в группе
+        elif update.callback_query:
+            # Обработка колбэк-запросов от инлайн-кнопок
+            logger.info(f"Получен callback_query: {update.callback_query}")
+            # Здесь можно добавить логику обработки колбэк-запросов
+        else:
+            # Логируем другие типы обновлений
+            logger.info(f"Получен необрабатываемый тип обновления: {body}")
         
         return {"ok": True}
         
