@@ -1,11 +1,13 @@
 import os
 import json
 import logging
-from typing import Optional
+import time
+from typing import Optional, List
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -32,96 +34,44 @@ class GoogleSheetsAPI:
         """Инициализация класса для работы с Google Sheets API"""
         self.credentials = None
         self.service = None
+        self.spreadsheet_id = None
         
-        # Путь к файлу с секретами клиента
-        self.client_secrets_file = os.path.join('credentials', 'client_secrets.json')
-        if not os.path.exists(self.client_secrets_file):
-            raise FileNotFoundError(f"Файл {self.client_secrets_file} не найден")
-
-    def _save_credentials(self, credentials: Credentials) -> None:
-        """
-        Сохраняет учетные данные в файл token.json
-        
-        Args:
-            credentials: Объект с учетными данными
-        """
-        try:
-            # Создаем директорию для токена, если её нет
-            os.makedirs('credentials', exist_ok=True)
-            
-            # Сохраняем токен
-            token_path = os.path.join('credentials', 'token.json')
-            with open(token_path, 'w') as token:
-                token.write(credentials.to_json())
-                
-            logger.info("Учетные данные успешно сохранены")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении учетных данных: {str(e)}")
-            raise
-
-    def _load_credentials(self) -> Optional[Credentials]:
-        """
-        Загружает сохраненные учетные данные из файла token.json
-        
-        Returns:
-            Optional[Credentials]: Объект с учетными данными или None, если файл не найден
-        """
-        try:
-            token_path = os.path.join('credentials', 'token.json')
-            if os.path.exists(token_path):
-                with open(token_path, 'r') as token:
-                    creds_data = json.load(token)
-                    credentials = Credentials.from_authorized_user_info(creds_data, SCOPES)
-                    logger.info("Учетные данные успешно загружены")
-                    return credentials
-                    
-            return None
-            
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке учетных данных: {str(e)}")
-            return None
+        # Путь к файлу с учетными данными сервисного аккаунта
+        self.credentials_file = os.path.join('credentials', 'credentials.json')
+        if not os.path.exists(self.credentials_file):
+            raise FileNotFoundError(f"Файл {self.credentials_file} не найден")
 
     def authenticate(self) -> None:
         """
-        Выполняет аутентификацию с Google Sheets API
-        
-        Процесс аутентификации:
-        1. Пытается загрузить существующие учетные данные
-        2. Проверяет, действительны ли они
-        3. Если нет - запускает процесс OAuth 2.0
-        4. Сохраняет новые учетные данные
-        5. Создает сервисный объект для работы с API
-        
-        Raises:
-            Exception: Если произошла ошибка при аутентификации
+        Выполняет аутентификацию с Google Sheets API через сервисный аккаунт
         """
         try:
-            # Пытаемся загрузить существующие учетные данные
-            self.credentials = self._load_credentials()
+            logger.info("Начало аутентификации через сервисный аккаунт")
             
-            # Если учетные данные есть и они валидны
-            if self.credentials and self.credentials.valid:
-                if self.credentials.expired and self.credentials.refresh_token:
-                    # Обновляем токен, если он истек
-                    self.credentials.refresh(Request())
-                    logger.info("Токен успешно обновлен")
-            else:
-                # Запускаем процесс OAuth 2.0
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.client_secrets_file, 
-                    SCOPES,
-                    redirect_uri='urn:ietf:wg:oauth:2.0:oob'
-                )
-                self.credentials = flow.run_local_server(port=0)
-                logger.info("Получены новые учетные данные через OAuth 2.0")
-                
-                # Сохраняем учетные данные
-                self._save_credentials(self.credentials)
+            # Загружаем учетные данные сервисного аккаунта
+            from google.oauth2.service_account import Credentials
+            self.credentials = Credentials.from_service_account_file(
+                self.credentials_file,
+                scopes=SCOPES
+            )
+            logger.info("Учетные данные сервисного аккаунта успешно загружены")
             
             # Создаем сервисный объект
             self.service = build('sheets', 'v4', credentials=self.credentials)
             logger.info("Сервисный объект успешно создан")
+            
+            # Загружаем ID основной таблицы из файла client_secrets.json
+            client_secrets_path = os.path.join('credentials', 'client_secrets.json')
+            if os.path.exists(client_secrets_path):
+                with open(client_secrets_path, 'r') as f:
+                    config = json.load(f)
+                    if 'installed' in config and 'main_sheet' in config['installed']:
+                        self.spreadsheet_id = config['installed']['main_sheet']
+                        logger.info(f"ID основной таблицы загружен: {self.spreadsheet_id}")
+                    else:
+                        logger.error("В файле client_secrets.json не найден ID основной таблицы")
+            else:
+                logger.error(f"Файл {client_secrets_path} не найден")
             
         except Exception as e:
             logger.error(f"Ошибка при аутентификации: {str(e)}")
@@ -438,60 +388,58 @@ class GoogleSheetsAPI:
             logger.error(f"Ошибка при получении списка листов: {str(e)}")
             raise
 
-    def _get_unique_sheet_name(self, spreadsheet_id: str, base_name: str) -> str:
+    def get_sheet_info(self, sheet_id: str) -> Optional[dict]:
         """
-        Генерирует уникальное имя листа, добавляя '-1', '-2' и т.д. если имя уже существует
+        Получает информацию о листе по его ID
         
         Args:
-            spreadsheet_id: ID таблицы
+            sheet_id: ID листа (gid)
+            
+        Returns:
+            Optional[dict]: Информация о листе или None, если лист не найден
+        """
+        try:
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
+            ).execute()
+            
+            for sheet in spreadsheet.get('sheets', []):
+                if str(sheet['properties']['sheetId']) == str(sheet_id):
+                    return sheet['properties']
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о листе: {str(e)}")
+            return None
+
+    def _get_unique_sheet_name(self, base_name: str) -> str:
+        """
+        Генерирует уникальное имя листа, добавляя -1, -2 и т.д. если имя занято
+        
+        Args:
             base_name: Базовое имя листа
             
         Returns:
             str: Уникальное имя листа
         """
-        # Получаем список существующих листов
-        spreadsheet = self.service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-        existing_names = [sheet['properties']['title'] for sheet in spreadsheet['sheets']]
-        
-        # Если базовое имя не существует, возвращаем его
-        if base_name not in existing_names:
-            return base_name
-        
-        # Иначе добавляем числовой суффикс
+        name = base_name
         counter = 1
-        while f"{base_name}-{counter}" in existing_names:
+        
+        while True:
+            # Проверяем существование листа
+            sheets = self.service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
+            ).execute().get('sheets', [])
+            
+            exists = any(sheet['properties']['title'] == name for sheet in sheets)
+            if not exists:
+                return name
+                
+            name = f"{base_name}-{counter}"
             counter += 1
-        
-        return f"{base_name}-{counter}"
 
-    def create_project_sheet_with_retry(self, project_name: str, sections: List[str]) -> int:
-        """
-        Создает новый лист проекта с заданными разделами на основе шаблонов.
-        
-        Args:
-            project_name: Название проекта
-            sections: Список разделов проекта
-            
-        Returns:
-            int: ID созданного листа
-        """
-        logger.info(f"Starting create_project_sheet_with_retry for project: {project_name} with sections: {sections}")
-        
-        try:
-            # Создаем словарь с данными проекта
-            project_data = {
-                "project_name": project_name,
-                "sections": sections
-            }
-            logger.info(f"Project data prepared: {json.dumps(project_data, ensure_ascii=False)}")
-            
-            # Вызываем основной метод создания листа
-            return self.create_project_sheet(project_data)
-        except Exception as e:
-            logger.error(f"Error in create_project_sheet_with_retry: {str(e)}")
-            raise
-    
-    def create_project_sheet(self, project_data: dict) -> int:
+    def create_project_sheet(self, project_data: dict) -> Optional[str]:
         """
         Создает новый лист проекта на основе шаблонов
         
@@ -503,221 +451,369 @@ class GoogleSheetsAPI:
                 }
             
         Returns:
-            int: ID созданного листа
+            Optional[str]: ID созданного листа или None в случае ошибки
         """
-        try:
-            # Загружаем конфигурацию
-            with open('credentials/client_secrets.json', 'r', encoding='utf-8') as f:
-                config = json.load(f)
+        # Извлекаем данные из словаря
+        project_name = project_data.get("project_name")
+        sections = project_data.get("sections", [])
+        
+        # Вызываем метод create_project_sheet_with_retry
+        return self.create_project_sheet_with_retry(project_name, sections)
+    
+    def create_project_sheet_with_retry(self, project_name: str, sections: List[str]) -> Optional[str]:
+        """
+        Создает новый лист проекта с заданными разделами на основе шаблонов.
+        
+        Args:
+            project_name: Название проекта
+            sections: Список разделов проекта
             
-            main_sheet_id = config['installed']['main_sheet']
-            template_top_id = config['installed']['template_top']
-            template_section_id = config['installed']['template_section']
-            
-            # Получаем уникальное имя листа
-            sheet_name = self._get_unique_sheet_name(main_sheet_id, project_data['project_name'])
-            
-            # Копируем шаблон верхней части в основную таблицу
-            template_metadata = self.service.spreadsheets().get(
-                spreadsheetId=template_top_id
-            ).execute()
-            source_sheet_id = template_metadata['sheets'][0]['properties']['sheetId']
-            
-            # Копируем лист с форматированием
-            request_body = {
-                'destinationSpreadsheetId': main_sheet_id
-            }
-            
-            response = self.service.spreadsheets().sheets().copyTo(
-                spreadsheetId=template_top_id,
-                sheetId=source_sheet_id,
-                body=request_body
-            ).execute()
-            
-            new_sheet_id = response['sheetId']
-            
-            # Переименовываем лист
-            rename_request = {
-                'requests': [{
-                    'updateSheetProperties': {
-                        'properties': {
-                            'sheetId': new_sheet_id,
-                            'title': sheet_name
-                        },
-                        'fields': 'title'
-                    }
-                }]
-            }
-            
-            self.service.spreadsheets().batchUpdate(
-                spreadsheetId=main_sheet_id,
-                body=rename_request
-            ).execute()
-            
-            # Получаем текущее количество строк в шаблоне верхней части
-            top_values = self.read_values(template_top_id, 'A1:A')
-            current_row = len(top_values) + 1 if top_values else 4
-            
-            # Сохраняем начальную строку для формулы
-            formula_parts = []
-            
-            # Для каждой секции копируем шаблон и заменяем placeholder
-            all_sections = project_data['sections'] + ['Прочее']  # Добавляем секцию "Прочее" с заглавной буквы
-            
-            for section in all_sections:
-                # Добавляем ссылку на ячейку с суммой для текущей секции
-                formula_parts.append(f'E{current_row}')
+        Returns:
+            Optional[str]: URL созданного листа или None в случае ошибки
+        """
+        max_retries = 3
+        retry_delay = 2  # секунды
+        
+        logger.info(f"Starting create_project_sheet_with_retry for project: {project_name} with sections: {sections}")
+        
+        for attempt in range(max_retries):
+            try:
+                # Создаем словарь с данными проекта
+                project_data = {
+                    "project_name": project_name,
+                    "sections": sections
+                }
+                logger.info(f"Project data prepared: {json.dumps(project_data, ensure_ascii=False)}")
                 
-                # Получаем данные из шаблона секции
-                section_metadata = self.service.spreadsheets().get(
-                    spreadsheetId=template_section_id
+                # Загружаем конфигурацию
+                client_secrets_path = os.path.join('credentials', 'client_secrets.json')
+                logger.info(f"Loading configuration from: {client_secrets_path}")
+                if not os.path.exists(client_secrets_path):
+                    logger.error(f"Файл {client_secrets_path} не найден")
+                    return None
+                    
+                with open(client_secrets_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                logger.info("Configuration loaded successfully")
+                
+                if 'installed' not in config:
+                    logger.error("В файле client_secrets.json нет раздела 'installed'")
+                    return None
+                    
+                # Проверяем наличие необходимых параметров
+                if 'main_sheet' not in config['installed']:
+                    logger.error("В файле client_secrets.json нет параметра 'main_sheet'")
+                    return None
+                    
+                if 'template_top' not in config['installed']:
+                    logger.error("В файле client_secrets.json нет параметра 'template_top'")
+                    return None
+                    
+                if 'template_section' not in config['installed']:
+                    logger.error("В файле client_secrets.json нет параметра 'template_section'")
+                    return None
+                
+                main_sheet_id = config['installed']['main_sheet']
+                template_top_id = config['installed']['template_top']
+                template_section_id = config['installed']['template_section']
+                
+                # Получаем уникальное имя листа
+                sheet_name = self._get_unique_sheet_name(project_data['project_name'])
+                logger.info(f"Generated unique sheet name: {sheet_name}")
+                
+                # Копируем шаблон верхней части в основную таблицу
+                logger.info(f"Getting template metadata from spreadsheet: {template_top_id}")
+                template_metadata = self.service.spreadsheets().get(
+                    spreadsheetId=template_top_id
                 ).execute()
-                section_sheet_id = section_metadata['sheets'][0]['properties']['sheetId']
+                source_sheet_id = template_metadata['sheets'][0]['properties']['sheetId']
+                logger.info(f"Source sheet ID: {source_sheet_id}")
                 
-                # Копируем секцию во временный лист
-                temp_response = self.service.spreadsheets().sheets().copyTo(
-                    spreadsheetId=template_section_id,
-                    sheetId=section_sheet_id,
-                    body={'destinationSpreadsheetId': main_sheet_id}
-                ).execute()
+                # Копируем лист с форматированием
+                request_body = {
+                    'destinationSpreadsheetId': main_sheet_id
+                }
+                logger.info(f"Copying template to main spreadsheet: {main_sheet_id}")
                 
-                temp_sheet_id = temp_response['sheetId']
-                temp_sheet_title = temp_response['title']
-                
-                # Читаем данные из временного листа
-                section_values = self.read_values(main_sheet_id, f'{temp_sheet_title}!A1:J')
-                
-                if section_values:
-                    # Получаем информацию о ячейках, включая формулы
-                    sheet_data = self.service.spreadsheets().get(
-                        spreadsheetId=main_sheet_id,
-                        ranges=[f'{temp_sheet_title}!A1:J'],
-                        includeGridData=True
+                try:
+                    response = self.service.spreadsheets().sheets().copyTo(
+                        spreadsheetId=template_top_id,
+                        sheetId=source_sheet_id,
+                        body=request_body
                     ).execute()
+                    logger.info(f"Template copied successfully: {response}")
                     
-                    grid_data = sheet_data['sheets'][0]['data'][0]['rowData']
-                    
-                    # Собираем обновления для текстовых ячеек
-                    requests = []
-                    for row_idx, row in enumerate(grid_data):
-                        if 'values' in row:
-                            for col_idx, cell in enumerate(row['values']):
-                                # Проверяем, что это текстовая ячейка без формулы
-                                if ('userEnteredValue' in cell and 
-                                    'stringValue' in cell['userEnteredValue'] and 
-                                    '{sectionName}' in cell['userEnteredValue']['stringValue']):
-                                    
-                                    requests.append({
-                                        'updateCells': {
-                                            'range': {
-                                                'sheetId': new_sheet_id,
-                                                'startRowIndex': current_row - 1 + row_idx,
-                                                'endRowIndex': current_row + row_idx,
-                                                'startColumnIndex': col_idx,
-                                                'endColumnIndex': col_idx + 1
-                                            },
-                                            'rows': [{
-                                                'values': [{
-                                                    'userEnteredValue': {
-                                                        'stringValue': cell['userEnteredValue']['stringValue'].replace('{sectionName}', section.title())
-                                                    }
-                                                }]
-                                            }],
-                                            'fields': 'userEnteredValue'
-                                        }
-                                    })
-                    
-                    # Копируем секцию целиком
-                    copy_request = {
-                        'requests': [
-                            {
-                                'copyPaste': {
-                                    'source': {
-                                        'sheetId': temp_sheet_id,
-                                        'startRowIndex': 0,
-                                        'endRowIndex': len(section_values),
-                                        'startColumnIndex': 0,
-                                        'endColumnIndex': 10  # Явно указываем 10 столбцов
-                                    },
-                                    'destination': {
-                                        'sheetId': new_sheet_id,
-                                        'startRowIndex': current_row - 1,
-                                        'endRowIndex': current_row - 1 + len(section_values),
-                                        'startColumnIndex': 0,
-                                        'endColumnIndex': 10  # Явно указываем 10 столбцов
-                                    },
-                                    'pasteType': 'PASTE_NORMAL'
-                                }
-                            }
-                        ]
-                    }
-                    
-                    # Применяем копирование
-                    self.service.spreadsheets().batchUpdate(
-                        spreadsheetId=main_sheet_id,
-                        body=copy_request
-                    ).execute()
-                    
-                    # Применяем обновления текстовых ячеек
-                    if requests:
-                        update_request = {'requests': requests}
-                        self.service.spreadsheets().batchUpdate(
-                            spreadsheetId=main_sheet_id,
-                            body=update_request
-                        ).execute()
-                    
-                    # Обновляем текущую строку
-                    current_row += len(section_values)
+                    new_sheet_id = response['sheetId']
+                    logger.info(f"New sheet ID: {new_sheet_id}")
+                except Exception as e:
+                    logger.error(f"Error copying template: {str(e)}")
+                    raise
                 
-                # Удаляем временный лист
-                delete_request = {
+                # Переименовываем лист
+                rename_request = {
                     'requests': [{
-                        'deleteSheet': {
-                            'sheetId': temp_sheet_id
+                        'updateSheetProperties': {
+                            'properties': {
+                                'sheetId': new_sheet_id,
+                                'title': sheet_name
+                            },
+                            'fields': 'title'
                         }
                     }]
                 }
                 
                 self.service.spreadsheets().batchUpdate(
                     spreadsheetId=main_sheet_id,
-                    body=delete_request
+                    body=rename_request
                 ).execute()
-            
-            # Обновляем формулу суммы в ячейке E2
-            formula = '=' + '+'.join(formula_parts)
-            formula_request = {
-                'requests': [{
-                    'updateCells': {
-                        'range': {
-                            'sheetId': new_sheet_id,
-                            'startRowIndex': 1,
-                            'endRowIndex': 2,
-                            'startColumnIndex': 4,
-                            'endColumnIndex': 5
-                        },
-                        'rows': [{
-                            'values': [{
-                                'userEnteredValue': {
-                                    'formulaValue': formula
+                
+                # Получаем текущее количество строк в шаблоне верхней части
+                top_values = self.read_values(template_top_id, 'A1:A')
+                current_row = len(top_values) + 1 if top_values else 4
+                
+                # Сохраняем начальную строку для формулы
+                formula_parts = []
+                
+                # Для каждой секции копируем шаблон и заменяем placeholder
+                all_sections = sections + ['Прочее']  # Добавляем секцию "Прочее" с заглавной буквы
+                logger.info(f"Processing sections: {all_sections}")
+                
+                # Обрабатываем только первый раздел для отладки
+                for index, section in enumerate(all_sections):
+                    logger.info(f"Processing section {index+1}/{len(all_sections)}: {section}")
+                    # Добавляем ссылку на ячейку с суммой для текущей секции
+                    formula_parts.append(f'E{current_row}')
+                    logger.info(f"Added formula part: E{current_row}")
+                    
+                    try:
+                        # Получаем данные из шаблона секции
+                        logger.info(f"Getting section template metadata from: {template_section_id}")
+                        section_metadata = self.service.spreadsheets().get(
+                            spreadsheetId=template_section_id
+                        ).execute()
+                        section_sheet_id = section_metadata['sheets'][0]['properties']['sheetId']
+                        logger.info(f"Section template sheet ID: {section_sheet_id}")
+                        
+                        # Копируем секцию во временный лист
+                        logger.info(f"Copying section template to main spreadsheet")
+                        temp_response = self.service.spreadsheets().sheets().copyTo(
+                            spreadsheetId=template_section_id,
+                            sheetId=section_sheet_id,
+                            body={'destinationSpreadsheetId': main_sheet_id}
+                        ).execute()
+                        logger.info(f"Section template copied successfully: {temp_response}")
+                        
+                        temp_sheet_id = temp_response['sheetId']
+                        temp_sheet_title = temp_response['title']
+                        logger.info(f"Temporary sheet created: ID={temp_sheet_id}, Title={temp_sheet_title}")
+                        
+                        # После обработки первого раздела выходим из цикла для отладки
+                        if index == 0:
+                            logger.info("Processed first section for debugging, breaking loop")
+                            break
+                    except Exception as e:
+                        logger.error(f"Error processing section {section}: {str(e)}")
+                        raise
+                    
+                    # Читаем данные из временного листа
+                    logger.info(f"Reading values from temporary sheet: {temp_sheet_title}!A1:J")
+                    section_values = self.read_values(main_sheet_id, f'{temp_sheet_title}!A1:J')
+                    logger.info(f"Read {len(section_values) if section_values else 0} rows from temporary sheet")
+                    
+                    if section_values:
+                        logger.info("Getting detailed cell information including formulas")
+                        # Получаем информацию о ячейках, включая формулы
+                        try:
+                            sheet_data = self.service.spreadsheets().get(
+                                spreadsheetId=main_sheet_id,
+                                ranges=[f'{temp_sheet_title}!A1:J'],
+                                includeGridData=True
+                            ).execute()
+                            logger.info("Successfully retrieved sheet data with grid data")
+                        except Exception as e:
+                            logger.error(f"Error getting sheet data: {str(e)}")
+                            raise
+                        
+                        try:
+                            grid_data = sheet_data['sheets'][0]['data'][0]['rowData']
+                            logger.info(f"Retrieved grid data with {len(grid_data)} rows")
+                            
+                            # Собираем обновления для текстовых ячеек
+                            requests = []
+                            logger.info("Starting to process cells for text replacements")
+                            
+                            # Проходим только первые 5 строк для отладки
+                            for row_idx, row in enumerate(grid_data[:5]):
+                                if 'values' in row:
+                                    for col_idx, cell in enumerate(row['values']):
+                                        # Проверяем, что это текстовая ячейка без формулы
+                                        if ('userEnteredValue' in cell and 
+                                            'stringValue' in cell['userEnteredValue']):
+                                            cell_value = cell['userEnteredValue']['stringValue']
+                                            if '{sectionName}' in cell_value:
+                                                logger.info(f"Found cell with placeholder at row {row_idx+1}, col {col_idx+1}: {cell_value}")
+                                                
+                                                try:
+                                                    new_value = cell_value.replace('{sectionName}', section.title())
+                                                    logger.info(f"Replacing placeholder with '{section.title()}' at row {row_idx+1}, col {col_idx+1}")
+                                                    
+                                                    requests.append({
+                                                        'updateCells': {
+                                                            'range': {
+                                                                'sheetId': new_sheet_id,
+                                                                'startRowIndex': current_row - 1 + row_idx,
+                                                                'endRowIndex': current_row + row_idx,
+                                                                'startColumnIndex': col_idx,
+                                                                'endColumnIndex': col_idx + 1
+                                                            },
+                                                            'rows': [{
+                                                                'values': [{
+                                                                    'userEnteredValue': {
+                                                                        'stringValue': new_value
+                                                                    }
+                                                                }]
+                                                            }],
+                                                            'fields': 'userEnteredValue'
+                                                        }
+                                                    })
+                                                    logger.info(f"Added update request for cell at row {current_row - 1 + row_idx}, col {col_idx}")
+                                                except Exception as e:
+                                                    logger.error(f"Error creating update request: {str(e)}")
+                                                    raise
+                            
+                            logger.info(f"Total update requests created: {len(requests)}")
+                        except Exception as e:
+                            logger.error(f"Error processing grid data: {str(e)}")
+                            raise
+                        
+                        # Копируем секцию целиком
+                        copy_request = {
+                            'requests': [
+                                {
+                                    'copyPaste': {
+                                        'source': {
+                                            'sheetId': temp_sheet_id,
+                                            'startRowIndex': 0,
+                                            'endRowIndex': len(section_values),
+                                            'startColumnIndex': 0,
+                                            'endColumnIndex': 10  # Явно указываем 10 столбцов
+                                        },
+                                        'destination': {
+                                            'sheetId': new_sheet_id,
+                                            'startRowIndex': current_row - 1,
+                                            'endRowIndex': current_row - 1 + len(section_values),
+                                            'startColumnIndex': 0,
+                                            'endColumnIndex': 10  # Явно указываем 10 столбцов
+                                        },
+                                        'pasteType': 'PASTE_NORMAL'
+                                    }
                                 }
-                            }]
-                        }],
-                        'fields': 'userEnteredValue'
+                            ]
+                        }
+                        
+                        # Применяем копирование
+                        try:
+                            logger.info(f"Executing copy request for section {section}")
+                            copy_response = self.service.spreadsheets().batchUpdate(
+                                spreadsheetId=main_sheet_id,
+                                body=copy_request
+                            ).execute()
+                            logger.info(f"Copy request executed successfully: {copy_response}")
+                        except Exception as e:
+                            logger.error(f"Error executing copy request: {str(e)}")
+                            raise
+                        
+                        # Применяем обновления текстовых ячеек
+                        if requests:
+                            try:
+                                logger.info(f"Executing update request with {len(requests)} requests")
+                                update_request = {'requests': requests}
+                                update_response = self.service.spreadsheets().batchUpdate(
+                                    spreadsheetId=main_sheet_id,
+                                    body=update_request
+                                ).execute()
+                                logger.info(f"Update request executed successfully: {update_response}")
+                            except Exception as e:
+                                logger.error(f"Error executing update request: {str(e)}")
+                                raise
+                        
+                        # Обновляем текущую строку
+                        current_row += len(section_values)
+                    
+                    # Удаляем временный лист
+                    delete_request = {
+                        'requests': [{
+                            'deleteSheet': {
+                                'sheetId': temp_sheet_id
+                            }
+                        }]
                     }
-                }]
-            }
-            
-            self.service.spreadsheets().batchUpdate(
-                spreadsheetId=main_sheet_id,
-                body=formula_request
-            ).execute()
-            
-            logger.info(f"Создан лист проекта '{project_data['project_name']}' с ID: {new_sheet_id}")
-            return new_sheet_id
-            
-        except Exception as e:
-            logger.error(f"Ошибка при создании листа проекта: {str(e)}")
-            raise
+                    
+                    try:
+                        logger.info(f"Deleting temporary sheet with ID: {temp_sheet_id}")
+                        delete_response = self.service.spreadsheets().batchUpdate(
+                            spreadsheetId=main_sheet_id,
+                            body=delete_request
+                        ).execute()
+                        logger.info(f"Temporary sheet deleted successfully: {delete_response}")
+                    except Exception as e:
+                        logger.error(f"Error deleting temporary sheet: {str(e)}")
+                        raise
+                
+                # Обновляем формулу суммы в ячейке E2
+                try:
+                    formula = '=' + '+'.join(formula_parts)
+                    logger.info(f"Creating formula for sum: {formula}")
+                    formula_request = {
+                        'requests': [{
+                            'updateCells': {
+                                'range': {
+                                    'sheetId': new_sheet_id,
+                                    'startRowIndex': 1,
+                                    'endRowIndex': 2,
+                                    'startColumnIndex': 4,
+                                    'endColumnIndex': 5
+                                },
+                                'rows': [{
+                                    'values': [{
+                                        'userEnteredValue': {
+                                            'formulaValue': formula
+                                        }
+                                    }]
+                                }],
+                                'fields': 'userEnteredValue'
+                            }
+                        }]
+                    }
+                    
+                    logger.info("Executing formula update request")
+                    formula_response = self.service.spreadsheets().batchUpdate(
+                        spreadsheetId=main_sheet_id,
+                        body=formula_request
+                    ).execute()
+                    logger.info(f"Formula update executed successfully: {formula_response}")
+                except Exception as e:
+                    logger.error(f"Error updating formula: {str(e)}")
+                    raise
+                
+                logger.info(f"Создан лист проекта '{project_name}' с ID: {new_sheet_id}")
+                return f"https://docs.google.com/spreadsheets/d/{main_sheet_id}/edit#gid={new_sheet_id}"
+                
+            except HttpError as e:
+                if e.resp.status == 503 and attempt < max_retries - 1:
+                    logger.warning(f"Попытка {attempt + 1} не удалась из-за недоступности сервиса. Ожидание {retry_delay} сек.")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                logger.error(f"Ошибка HTTP при создании листа проекта: {str(e)}")
+                return None
+            except Exception as e:
+                logger.error(f"Ошибка при создании листа проекта: {str(e)}")
+                return None
+        
+        # Если все попытки не удались
+        logger.error("Все попытки создания листа проекта не удались")
+        return None
 
 if __name__ == "__main__":
     try:
