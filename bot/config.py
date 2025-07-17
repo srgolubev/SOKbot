@@ -12,7 +12,7 @@ def load_config():
     
     config = {
         "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
-        "TELEGRAM_BOT_TOKEN": os.getenv("TELEGRAM_TOKEN"),
+        "TELEGRAM_BOT_TOKEN": os.getenv("TELEGRAM_BOT_TOKEN"),
         "GOOGLE_SHEETS_ID": os.getenv("GOOGLE_SHEETS_ID"),
         "GOOGLE_CREDENTIALS_FILE": os.path.join("credentials", "credentials.json")
     }
